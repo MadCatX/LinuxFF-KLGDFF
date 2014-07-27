@@ -2,19 +2,24 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/sysfs.h>
+#include <linux/timer.h>
 #include "../KLGD/klgd.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Michal \"MadCatX\" Maly");
 MODULE_DESCRIPTION("...");
 
+/* BEGIN: Forward function declarations */
 static ssize_t klgdtm_num_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf);
 static ssize_t klgdtm_num_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count);
+/* END: Forward function declarations */
 
+/* BEGIN: Variables used by the module */
 static struct kobject *klgdtm_obj;
 static int klgdtm_number;
 
 static struct klgd_main klgd;
+static struct timer_list klgdtm_timer;
 
 static struct kobj_attribute put_num_attr = 
 	__ATTR(num, 0666, klgdtm_num_show, klgdtm_num_store);
@@ -27,8 +32,9 @@ static struct attribute *attrs[] = {
 static struct attribute_group attrs_grp = {
 	.attrs = attrs
 };
+/* END: Variables used by the module */
 
-/* KLGD plugin */
+/* BEGIN: KLGDTM test plugin definition */
 
 struct klgd_plugin_private {
 	int old_n;
@@ -36,6 +42,7 @@ struct klgd_plugin_private {
 };
 
 static struct klgd_plugin_private plugin_private = {
+	0,
 	0
 };
 
@@ -83,7 +90,7 @@ bool klgdtm_plugin_get_update_time(struct klgd_plugin *self, const unsigned long
 	struct klgd_plugin_private *p = self->private;
 
 	if (p->n) {
-		*t = now + msecs_to_jiffies(1000);
+		*t = now + msecs_to_jiffies(500);
 		return true;
 	}
 	return false;
@@ -113,7 +120,16 @@ static struct klgd_plugin klgdtm_plugin = {
 };
 
 
-/** END of plugin definition */
+/* END: KLGDTM test plugin definition */
+
+/* BEGIN: KLGDTM module code */
+
+/* Callback function called by KLGD when a new command stream is submitted */
+
+static void klgdtm_timer_fired(unsigned long data)
+{
+	klgd_notify_commands_sent(&klgd);
+}
 
 static enum klgd_send_status klgdtm_callback(void *data, struct klgd_command_stream *s)
 {
@@ -131,7 +147,9 @@ static enum klgd_send_status klgdtm_callback(void *data, struct klgd_command_str
 	old_num = *(int*)(s->commands[0]->bytes + sizeof(int));
 	printk(KERN_NOTICE "KLGDTM: Value %d, prev: %d\n", num, old_num);
 
-	return KLGD_SS_DONE;
+	mod_timer(&klgdtm_timer, msecs_to_jiffies(1000));
+
+	return KLGD_SS_RUNNING;
 }
 
 static ssize_t klgdtm_num_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
@@ -151,8 +169,8 @@ static ssize_t klgdtm_num_store(struct kobject *kobj, struct kobj_attribute *att
 
 static void __exit klgdtm_exit(void)
 {
-	klgd_deinit(&klgd);
 	sysfs_remove_group(klgdtm_obj, &attrs_grp);
+	klgd_deinit(&klgd);
 	kobject_put(klgdtm_obj);
 	printk(KERN_NOTICE "KLGD sample module removed\n");
 }
@@ -176,6 +194,7 @@ static int __init klgdtm_init(void)
 	}
 
 	klgd_register_plugin(&klgd, 0, &klgdtm_plugin);
+	setup_timer(&klgdtm_timer, klgdtm_timer_fired, 0);
 
 	printk(KERN_NOTICE "KLGD sample module loaded\n");
 	return 0;
@@ -186,6 +205,7 @@ errout_sysfs:
 	kobject_put(klgdtm_obj);
 	return ret;
 }
+/* END: KLGDTM module code */
 
 module_exit(klgdtm_exit)
 module_init(klgdtm_init);

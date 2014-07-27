@@ -1,3 +1,4 @@
+# You will want to fix this line
 KBUILD_EXTRA_SYMBOLS := /home/madcat/Devel/KLGD/Module.symvers
 
 ifneq ($(KERNELRELEASE),)
