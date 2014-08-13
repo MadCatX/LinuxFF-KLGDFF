@@ -15,7 +15,7 @@ static struct klgd_plugin *ff_plugin;
 
 static struct klgd_command * klgdff_erase(const struct ff_effect *effect, const int id)
 {
-	char *text = kasprintf(GFP_KERNEL, "Erasing effect, type %d, id %d\n", effect->type, id);
+	char *text = kasprintf(GFP_KERNEL, "Erasing effect, type %d, id %d", effect->type, id);
 	struct klgd_command *c = klgd_alloc_cmd(strlen(text) + 1);
 	c->bytes = text;
 	return c;
@@ -23,7 +23,7 @@ static struct klgd_command * klgdff_erase(const struct ff_effect *effect, const 
 
 static struct klgd_command * klgdff_start(const struct ff_effect *effect, const int id)
 {
-	char *text = kasprintf(GFP_KERNEL, "Playing effect, type %d, id %d\n", effect->type, id);
+	char *text = kasprintf(GFP_KERNEL, "Playing effect, type %d, id %d", effect->type, id);
 	struct klgd_command *c = klgd_alloc_cmd(strlen(text) + 1);
 	c->bytes = text;
 	return c;
@@ -31,7 +31,7 @@ static struct klgd_command * klgdff_start(const struct ff_effect *effect, const 
 
 static struct klgd_command * klgdff_stop(const struct ff_effect *effect, const int id)
 {
-	char *text = kasprintf(GFP_KERNEL, "Stopping effect, type %d, id %d\n", effect->type, id);
+	char *text = kasprintf(GFP_KERNEL, "Stopping effect, type %d, id %d", effect->type, id);
 	struct klgd_command *c = klgd_alloc_cmd(strlen(text) + 1);
 	c->bytes = text;
 	return c;
@@ -39,13 +39,13 @@ static struct klgd_command * klgdff_stop(const struct ff_effect *effect, const i
 
 static struct klgd_command * klgdff_upload(const struct ff_effect *effect, const int id)
 {
-	char *text = kasprintf(GFP_KERNEL, "Uploading effect, type %d, id %d\n", effect->type, id);
+	char *text = kasprintf(GFP_KERNEL, "Uploading effect, type %d, id %d", effect->type, id);
 	struct klgd_command *c = klgd_alloc_cmd(strlen(text) + 1);
 	c->bytes = text;
 	return c;
 }
 
-static enum klgd_send_status klgdff_callback(void *data, const struct klgd_command_stream *s)
+int klgdff_callback(void *data, const struct klgd_command_stream *s)
 {
 	size_t idx;
 
@@ -53,9 +53,9 @@ static enum klgd_send_status klgdff_callback(void *data, const struct klgd_comma
 	for (idx = 0; idx < s->count; idx++)
 		printk(KERN_NOTICE "KLGDTM - EFF %s\n", s->commands[idx]->bytes);
 
-	usleep_range(7, 9);
+	usleep_range(7500, 8500);
 
-	return KLGD_SS_DONE;
+	return 0;
 }
 
 static void __exit klgdff_exit(void)
