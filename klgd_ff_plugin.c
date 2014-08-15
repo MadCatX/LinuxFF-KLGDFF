@@ -199,7 +199,6 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 			case FFPL_TO_ERASE:
 				klgd_append_cmd(s, priv->stop_effect(eff->active, idx));
 				klgd_append_cmd(s, priv->erase_effect(eff->active, idx));
-				eff->state = FFPL_EMPTY;
 				kfree(eff->active);
 				if (eff->active != eff->latest)
 					kfree(eff->latest);
