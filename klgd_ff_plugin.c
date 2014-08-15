@@ -4,6 +4,7 @@
 
 static bool ffpl_replace_effect(const struct ff_effect *ac_eff, const struct ff_effect *la_eff);
 
+/* Destroy request - input device is being destroyed */
 static void ffpl_destroy_rq(struct ff_device *ff)
 {	
 	struct klgd_plugin *self = ff->private;
@@ -23,6 +24,7 @@ static void ffpl_destroy_rq(struct ff_device *ff)
 	ff->private = NULL;
 }
 
+/* Erase request coming from userspace */
 static int ffpl_erase_rq(struct input_dev *dev, int effect_id)
 {
 	struct klgd_plugin *self = dev->ff->private;
@@ -35,7 +37,8 @@ static int ffpl_erase_rq(struct input_dev *dev, int effect_id)
 
 	return 0;
 }
-	
+
+/* Playback request coming from userspace */
 static int ffpl_playback_rq(struct input_dev *dev, int effect_id, int value)
 {
 	struct klgd_plugin *self = dev->ff->private;
@@ -54,6 +57,7 @@ static int ffpl_playback_rq(struct input_dev *dev, int effect_id, int value)
 	return 0;
 }
 
+/* Upload request coming from userspace */
 static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struct ff_effect *old)
 {
 	struct klgd_plugin *self = dev->ff->private;
