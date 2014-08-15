@@ -304,7 +304,7 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 	*plugin = self;
 
 	set_bit(FF_GAIN, dev->ffbit);
-	for (idx = 0; idx < (FF_EFFECT_MAX - FF_EFFECT_MIN); idx++) {
+	for (idx = 0; idx <= (FF_EFFECT_MAX - FF_EFFECT_MIN); idx++) {
 		if (test_bit(idx, &priv->supported_effects)) {
 			printk(KERN_NOTICE "KLGDFF: Has bit %d, effect type %d\n", idx, FF_EFFECT_MIN + idx);
 			input_set_capability(dev, EV_FF, idx + FF_EFFECT_MIN);
