@@ -16,32 +16,36 @@ static struct klgd_plugin *ff_plugin;
 static struct klgd_command * klgdff_erase(struct input_dev *dev, const struct ff_effect *effect, const int id)
 {
 	char *text = kasprintf(GFP_KERNEL, "Erasing effect, type %d, id %d", effect->type, id);
-	struct klgd_command *c = klgd_alloc_cmd(strlen(text) + 1);
-	c->bytes = text;
+	size_t len = strlen(text);
+	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+	memcpy(c->bytes, text, len);
 	return c;
 }
 
 static struct klgd_command * klgdff_start(struct input_dev *de, const struct ff_effect *effect, const int id)
 {
 	char *text = kasprintf(GFP_KERNEL, "Playing effect, type %d, id %d", effect->type, id);
-	struct klgd_command *c = klgd_alloc_cmd(strlen(text) + 1);
-	c->bytes = text;
+	size_t len = strlen(text);
+	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+	memcpy(c->bytes, text, len);
 	return c;
 }
 
 static struct klgd_command * klgdff_stop(struct input_dev *dev, const struct ff_effect *effect, const int id)
 {
 	char *text = kasprintf(GFP_KERNEL, "Stopping effect, type %d, id %d", effect->type, id);
-	struct klgd_command *c = klgd_alloc_cmd(strlen(text) + 1);
-	c->bytes = text;
+	size_t len = strlen(text);
+	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+	memcpy(c->bytes, text, len);
 	return c;
 }
 
 static struct klgd_command * klgdff_upload(struct input_dev *dev, const struct ff_effect *effect, const int id)
 {
 	char *text = kasprintf(GFP_KERNEL, "Uploading effect, type %d, id %d", effect->type, id);
-	struct klgd_command *c = klgd_alloc_cmd(strlen(text) + 1);
-	c->bytes = text;
+	size_t len = strlen(text);
+	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+	memcpy(c->bytes, text, len);
 	return c;
 }
 
