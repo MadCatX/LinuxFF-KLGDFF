@@ -5,7 +5,7 @@
 
 int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const size_t effect_count,
 		     const unsigned long supported_effects,
-		     struct klgd_command * (*upload)(const struct ff_effect *effect, const int id),
-		     struct klgd_command * (*play)(const struct ff_effect *effect, const int id),
-		     struct klgd_command * (*stop)(const struct ff_effect *effect, const int id),
-		     struct klgd_command * (*erase)(const struct ff_effect *effect, const int id));
+		     struct klgd_command * (*upload)(struct input_dev *dev, const struct ff_effect *effect, const int id),
+		     struct klgd_command * (*play)(struct input_dev *dev, const struct ff_effect *effect, const int id),
+		     struct klgd_command * (*stop)(struct input_dev *dev, const struct ff_effect *effect, const int id),
+		     struct klgd_command * (*erase)(struct input_dev *dev, const struct ff_effect *effect, const int id));

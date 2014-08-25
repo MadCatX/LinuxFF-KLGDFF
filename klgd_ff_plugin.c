@@ -2,6 +2,7 @@
 #include "klgd_ff_plugin_p.h"
 #include <linux/slab.h>
 
+static bool ffpl_has_gain(const struct ff_effect *eff);
 static bool ffpl_replace_effect(const struct ff_effect *ac_eff, const struct ff_effect *la_eff);
 
 /* Destroy request - input device is being destroyed */
@@ -90,15 +91,23 @@ static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struc
 	return 0;
 }
 
+
 static void ffpl_set_gain_rq(struct input_dev *dev, u16 gain)
 {
 	struct klgd_plugin *self = dev->ff->private;
+	struct klgd_plugin_private *priv = self->private;
+	size_t idx;
 
 	klgd_lock_plugins(self->plugins_lock);
 
-	//TODO
 	printk(KERN_DEBUG "KLGDFF: Gain set, %u\n", gain);
-	//
+	for (idx = 0; idx < priv->effect_count; idx++) {
+		struct ffpl_effect *eff = &priv->effects[idx];
+
+		if (ffpl_has_gain(eff->active))
+			eff->change = FFPL_TO_UPDATE;
+	}
+	priv->gain = gain;
 
 	klgd_unlock_plugins_sched(self->plugins_lock);
 }
@@ -111,6 +120,7 @@ static void ffpl_deinit(struct klgd_plugin *self)
 static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, const unsigned long now)
 {
 	struct klgd_plugin_private *priv = self->private;
+	struct input_dev *const dev = priv->dev;
 	struct klgd_command_stream *s;
 	size_t idx;
 
@@ -130,9 +140,9 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 		if (eff->replace) {
 			switch (eff->state) {
 			case FFPL_STARTED:
-				klgd_append_cmd(s, priv->stop_effect(eff->active, idx));
+				klgd_append_cmd(s, priv->stop_effect(dev, eff->active, idx));
 			default:
-				klgd_append_cmd(s, priv->erase_effect(eff->active, idx));
+				klgd_append_cmd(s, priv->erase_effect(dev, eff->active, idx));
 				kfree(eff->active);
 				eff->active = NULL;
 				break;
@@ -153,14 +163,14 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 			switch (eff->change) {
 			case FFPL_TO_UPLOAD:
 			case FFPL_TO_STOP:
-				klgd_append_cmd(s, priv->upload_effect(eff->latest, idx));
+				klgd_append_cmd(s, priv->upload_effect(dev, eff->latest, idx));
 				eff->active = eff->latest;
 				eff->state = FFPL_UPLOADED;
 				break;
 			case FFPL_TO_START:
-				klgd_append_cmd(s, priv->upload_effect(eff->latest, idx));
+				klgd_append_cmd(s, priv->upload_effect(dev, eff->latest, idx));
 				eff->active = eff->latest;
-				klgd_append_cmd(s, priv->start_effect(eff->active, idx));
+				klgd_append_cmd(s, priv->start_effect(dev, eff->active, idx));
 				eff->state = FFPL_STARTED;
 				break;
 			default:
@@ -170,11 +180,11 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 		case FFPL_UPLOADED:
 			switch (eff->change) {
 			case FFPL_TO_START:
-				klgd_append_cmd(s, priv->start_effect(eff->active, idx));
+				klgd_append_cmd(s, priv->start_effect(dev, eff->active, idx));
 				eff->state = FFPL_STARTED;
 				break;
 			case FFPL_TO_ERASE:
-				klgd_append_cmd(s, priv->erase_effect(eff->active, idx));
+				klgd_append_cmd(s, priv->erase_effect(dev, eff->active, idx));
 				kfree(eff->active);
 				if (eff->active != eff->latest)
 					kfree(eff->latest);
@@ -183,7 +193,7 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 				eff->state = FFPL_EMPTY;
 				break;
 			case FFPL_TO_UPDATE:
-				klgd_append_cmd(s, priv->upload_effect(eff->latest, idx));
+				klgd_append_cmd(s, priv->upload_effect(dev, eff->latest, idx));
 				eff->active = eff->latest;
 				break;
 			default:
@@ -193,12 +203,12 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 		case FFPL_STARTED:
 			switch (eff->change) {
 			case FFPL_TO_STOP:
-				klgd_append_cmd(s, priv->stop_effect(eff->active, idx));
+				klgd_append_cmd(s, priv->stop_effect(dev, eff->active, idx));
 				eff->state = FFPL_UPLOADED;
 				break;
 			case FFPL_TO_ERASE:
-				klgd_append_cmd(s, priv->stop_effect(eff->active, idx));
-				klgd_append_cmd(s, priv->erase_effect(eff->active, idx));
+				klgd_append_cmd(s, priv->stop_effect(dev, eff->active, idx));
+				klgd_append_cmd(s, priv->erase_effect(dev, eff->active, idx));
 				kfree(eff->active);
 				if (eff->active != eff->latest)
 					kfree(eff->latest);
@@ -207,7 +217,7 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 				eff->state = FFPL_EMPTY;
 				break;
 			case FFPL_TO_UPDATE:
-				klgd_append_cmd(s, priv->upload_effect(eff->latest, idx));
+				klgd_append_cmd(s, priv->upload_effect(dev, eff->latest, idx));
 				eff->active = eff->latest;
 			default:
 				break;
@@ -238,6 +248,19 @@ static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long n
 	return events ? true : false;
 }
 
+static bool ffpl_has_gain(const struct ff_effect *eff)
+{
+	switch (eff->type) {
+	case FF_CONSTANT:
+        case FF_PERIODIC:
+	case FF_RAMP:
+	case FF_RUMBLE:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static int ffpl_init(struct klgd_plugin *self)
 {
 	struct klgd_plugin_private *priv = self->private;
@@ -262,10 +285,10 @@ static int ffpl_init(struct klgd_plugin *self)
 /* Initialize the plugin */
 int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const size_t effect_count,
 		     const unsigned long supported_effects,
-		     struct klgd_command * (*upload)(const struct ff_effect *effect, const int id),
-		     struct klgd_command * (*start)(const struct ff_effect *effect, const int id),
-		     struct klgd_command * (*stop)(const struct ff_effect *effect, const int id),
-		     struct klgd_command * (*erase)(const struct ff_effect *effect, const int id))
+		     struct klgd_command * (*upload)(struct input_dev *dev, const struct ff_effect *effect, const int id),
+		     struct klgd_command * (*start)(struct input_dev *dev, const struct ff_effect *effect, const int id),
+		     struct klgd_command * (*stop)(struct input_dev *dev, const struct ff_effect *effect, const int id),
+		     struct klgd_command * (*erase)(struct input_dev *dev, const struct ff_effect *effect, const int id))
 {
 	struct klgd_plugin *self;
 	struct klgd_plugin_private *priv;

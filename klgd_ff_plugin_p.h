@@ -28,9 +28,10 @@ struct klgd_plugin_private {
 	struct ffpl_effect *effects;
 	unsigned long supported_effects;
 	size_t effect_count;
+	u16 gain;
 	struct input_dev *dev;
-	struct klgd_command * (*upload_effect)(const struct ff_effect *effect, const int id);
-	struct klgd_command * (*start_effect)(const struct ff_effect *effect, const int id);
-	struct klgd_command * (*stop_effect)(const struct ff_effect *effect, const int id);
-	struct klgd_command * (*erase_effect)(const struct ff_effect *effect, const int id);
+	struct klgd_command * (*upload_effect)(struct input_dev *dev, const struct ff_effect *effect, const int id);
+	struct klgd_command * (*start_effect)(struct input_dev *dev, const struct ff_effect *effect, const int id);
+	struct klgd_command * (*stop_effect)(struct input_dev *dev, const struct ff_effect *effect, const int id);
+	struct klgd_command * (*erase_effect)(struct input_dev *dev, const struct ff_effect *effect, const int id);
 };
