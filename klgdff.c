@@ -19,6 +19,7 @@ static struct klgd_command * klgdff_erase(struct input_dev *dev, const struct ff
 	size_t len = strlen(text);
 	struct klgd_command *c = klgd_alloc_cmd(len + 1);
 	memcpy(c->bytes, text, len);
+	kfree(text);
 	return c;
 }
 
@@ -28,6 +29,7 @@ static struct klgd_command * klgdff_start(struct input_dev *de, const struct ff_
 	size_t len = strlen(text);
 	struct klgd_command *c = klgd_alloc_cmd(len + 1);
 	memcpy(c->bytes, text, len);
+	kfree(text);
 	return c;
 }
 
@@ -37,6 +39,7 @@ static struct klgd_command * klgdff_stop(struct input_dev *dev, const struct ff_
 	size_t len = strlen(text);
 	struct klgd_command *c = klgd_alloc_cmd(len + 1);
 	memcpy(c->bytes, text, len);
+	kfree(text);
 	return c;
 }
 
@@ -46,6 +49,7 @@ static struct klgd_command * klgdff_upload(struct input_dev *dev, const struct f
 	size_t len = strlen(text);
 	struct klgd_command *c = klgd_alloc_cmd(len + 1);
 	memcpy(c->bytes, text, len);
+	kfree(text);
 	return c;
 }
 
