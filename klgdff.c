@@ -122,7 +122,7 @@ static int __init klgdff_init(void)
 		goto errout_regdev;
 	}
 	
-	ret = klgd_register_plugin(&klgd, 0, ff_plugin);
+	ret = klgd_register_plugin(&klgd, 0, ff_plugin, true);
 	if (ret) {
 		printk(KERN_ERR "KLGDFF: Cannot register plugin\n");
 		goto errout_idev;

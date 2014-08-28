@@ -21,8 +21,6 @@ static void ffpl_destroy_rq(struct ff_device *ff)
 	}
 	kfree(priv->effects);
 	kfree(priv);
-	/* Prevent double free in klgd_deinit() */
-	ff->private = NULL;
 }
 
 /* Erase request coming from userspace */
