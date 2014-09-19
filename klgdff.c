@@ -13,44 +13,102 @@ static struct input_dev *dev;
 static struct klgd_main klgd;
 static struct klgd_plugin *ff_plugin;
 
-static struct klgd_command * klgdff_erase(struct input_dev *dev, const struct ff_effect *effect, const int id)
+static int klgdff_erase(struct klgd_command_stream *s, const struct ff_effect *effect)
 {
-	char *text = kasprintf(GFP_KERNEL, "Erasing effect, type %d, id %d", effect->type, id);
+	char *text = kasprintf(GFP_KERNEL, "Erasing effect, type %d, id %d", effect->type, effect->id);
 	size_t len = strlen(text);
 	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+
+	if (!c)
+		return -ENOMEM;
+
 	memcpy(c->bytes, text, len);
 	kfree(text);
-	return c;
+	return klgd_append_cmd(s, c);
 }
 
-static struct klgd_command * klgdff_start(struct input_dev *de, const struct ff_effect *effect, const int id)
+static int klgdff_er_stop(struct klgd_command_stream *s, const struct ff_effect *effect)
 {
-	char *text = kasprintf(GFP_KERNEL, "Playing effect, type %d, id %d", effect->type, id);
+	char *text = kasprintf(GFP_KERNEL, "Stopping and erasing effect, type %d, id %d", effect->type, effect->id);
 	size_t len = strlen(text);
 	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+
+	if (!c)
+		return -ENOMEM;
+
 	memcpy(c->bytes, text, len);
 	kfree(text);
-	return c;
+	return klgd_append_cmd(s, c);
 }
 
-static struct klgd_command * klgdff_stop(struct input_dev *dev, const struct ff_effect *effect, const int id)
+static int klgdff_start(struct klgd_command_stream *s, const struct ff_effect *effect)
 {
-	char *text = kasprintf(GFP_KERNEL, "Stopping effect, type %d, id %d", effect->type, id);
+	char *text = kasprintf(GFP_KERNEL, "Playing effect, type %d, id %d", effect->type, effect->id);
 	size_t len = strlen(text);
 	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+
+	if (!c)
+		return -ENOMEM;
+
 	memcpy(c->bytes, text, len);
 	kfree(text);
-	return c;
+	return klgd_append_cmd(s, c);
 }
 
-static struct klgd_command * klgdff_upload(struct input_dev *dev, const struct ff_effect *effect, const int id)
+static int klgdff_stop(struct klgd_command_stream *s, const struct ff_effect *effect)
 {
-	char *text = kasprintf(GFP_KERNEL, "Uploading effect, type %d, id %d", effect->type, id);
+	char *text = kasprintf(GFP_KERNEL, "Stopping effect, type %d, id %d", effect->type, effect->id);
 	size_t len = strlen(text);
 	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+
+	if (!c)
+		return -ENOMEM;
+
 	memcpy(c->bytes, text, len);
 	kfree(text);
-	return c;
+	return klgd_append_cmd(s, c);
+}
+
+static int klgdff_update(struct klgd_command_stream *s, const struct ff_effect *effect)
+{
+	char *text = kasprintf(GFP_KERNEL, "Updating effect, type %d, id %d", effect->type, effect->id);
+	size_t len = strlen(text);
+	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+
+	if (!c)
+		return -ENOMEM;
+
+	memcpy(c->bytes, text, len);
+	kfree(text);
+	return klgd_append_cmd(s, c);
+}
+
+static int klgdff_upload(struct klgd_command_stream *s, const struct ff_effect *effect)
+{
+	char *text = kasprintf(GFP_KERNEL, "Uploading effect, type %d, id %d", effect->type, effect->id);
+	size_t len = strlen(text);
+	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+
+	if (!c)
+		return -ENOMEM;
+
+	memcpy(c->bytes, text, len);
+	kfree(text);
+	return klgd_append_cmd(s, c);
+}
+
+static int klgdff_up_start(struct klgd_command_stream *s, const struct ff_effect *effect)
+{
+	char *text = kasprintf(GFP_KERNEL, "Uploading and starting effect, type %d, id %d", effect->type, effect->id);
+	size_t len = strlen(text);
+	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+
+	if (!c)
+		return -ENOMEM;
+
+	memcpy(c->bytes, text, len);
+	kfree(text);
+	return klgd_append_cmd(s, c);
 }
 
 int klgdff_callback(void *data, const struct klgd_command_stream *s)
@@ -62,6 +120,38 @@ int klgdff_callback(void *data, const struct klgd_command_stream *s)
 		printk(KERN_NOTICE "KLGDTM - EFF %s\n", s->commands[idx]->bytes);
 
 	usleep_range(7500, 8500);
+
+	return 0;
+}
+
+int klgdff_control(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data)
+{
+	switch (cmd) {
+	case FFPL_EMP_TO_UPL:
+		return klgdff_upload(s, data.effect);
+		break;
+	case FFPL_UPL_TO_SRT:
+		return klgdff_start(s, data.effect);
+		break;
+	case FFPL_SRT_TO_UPL:
+		return klgdff_stop(s, data.effect);
+		break;
+	case FFPL_UPL_TO_EMP:
+		return klgdff_erase(s, data.effect);
+		break;
+	case FFPL_SRT_TO_UDT:
+		return klgdff_update(s, data.effect);
+		break;
+	/* "Uploadless" commands */
+	case FFPL_EMP_TO_SRT:
+		return klgdff_up_start(s, data.effect);
+		break;
+	case FFPL_SRT_TO_EMP:
+		return klgdff_er_stop(s, data.effect);
+		break;
+	default:
+		break;
+	}
 
 	return 0;
 }
@@ -111,7 +201,8 @@ static int __init klgdff_init(void)
 	input_set_abs_params(dev, ABS_Y, -0x7fff, 0x7fff, 0, 0);
 
 	ret = ffpl_init_plugin(&ff_plugin, dev, EFFECT_COUNT, ffbits,
-			       klgdff_upload, klgdff_start, klgdff_stop, klgdff_erase);
+			       FFPL_ERASE_WHEN_STOPPED,
+			       klgdff_control);
 	if (ret) {
 		printk(KERN_ERR "KLGDFF: Cannot init plugin\n");
 		goto errout_idev;

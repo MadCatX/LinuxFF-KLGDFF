@@ -1,5 +1,6 @@
+#include "klgd_ff_plugin.h"
 
-/* State change flags */
+/* Possible state changes of an effect */
 enum ffpl_st_change {
 	FFPL_DONT_TOUCH,  /* Effect has not been changed since last update */
 	FFPL_TO_UPLOAD,	  /* Effect shall be uploaded to device */
@@ -9,7 +10,7 @@ enum ffpl_st_change {
 	FFPL_TO_UPDATE	  /* Effect paramaters shall be updated */
 };
 
-/* Status flags */
+/* Possible states of an effect */
 enum ffpl_state {
 	FFPL_EMPTY,	  /* There is no effect in the slot */
 	FFPL_UPLOADED,	  /* Effect in the slot is uploaded to device */
@@ -22,16 +23,18 @@ struct ffpl_effect {
 	enum ffpl_st_change change;	/* State to which the effect shall be put */
 	enum ffpl_state state;		/* State of the active effect */
 	bool replace;			/* Active effect has to be replaced => active effect shall be erased and latest uploaded */
+	bool uploaded_to_device;	/* Effect was physically uploaded to device */
 };
 
 struct klgd_plugin_private {
 	struct ffpl_effect *effects;
 	unsigned long supported_effects;
 	size_t effect_count;
-	u16 gain;
 	struct input_dev *dev;
-	struct klgd_command * (*upload_effect)(struct input_dev *dev, const struct ff_effect *effect, const int id);
-	struct klgd_command * (*start_effect)(struct input_dev *dev, const struct ff_effect *effect, const int id);
-	struct klgd_command * (*stop_effect)(struct input_dev *dev, const struct ff_effect *effect, const int id);
-	struct klgd_command * (*erase_effect)(struct input_dev *dev, const struct ff_effect *effect, const int id);
+	/* Optional device capabilities */
+	bool has_emp_to_srt;
+	bool has_srt_to_emp;
+	bool upload_when_started;
+	bool erase_when_stopped;
+	int (*control)(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data);
 };
