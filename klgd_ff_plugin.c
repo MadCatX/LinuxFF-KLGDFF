@@ -83,11 +83,19 @@ static int ffpl_update_effect(struct klgd_plugin_private *priv, struct klgd_comm
 {
 	struct input_dev *dev = priv->dev;
 	union ffpl_control_data data;
+	int ret;
+	enum ffpl_control_command cmd;
 
-	data.effect = eff->active;
 	if (!eff->uploaded_to_device)
 		return ffpl_start_effect(priv, s, eff);
-	return priv->control(dev, s, FFPL_SRT_TO_UDT, data);
+
+	data.effect = eff->latest;
+	ret = priv->control(dev, s, FFPL_SRT_TO_UDT, data);
+	if (ret)
+		return ret;
+	eff->active = eff->latest;
+	eff->latest = NULL;
+	return 0;
 }
 
 static int ffpl_upload_effect(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff)
@@ -96,10 +104,8 @@ static int ffpl_upload_effect(struct klgd_plugin_private *priv, struct klgd_comm
 	union ffpl_control_data data;
 	int ret;
 
-	if (priv->upload_when_started) {
-		eff->state = FFPL_UPLOADED;
+	if (priv->upload_when_started)
 		goto set;
-	}
 
 	data.effect = eff->latest;
 	ret = priv->control(dev, s, FFPL_EMP_TO_SRT, data);
@@ -110,6 +116,7 @@ static int ffpl_upload_effect(struct klgd_plugin_private *priv, struct klgd_comm
 set:
 	eff->state = FFPL_UPLOADED;
 	eff->active = eff->latest;
+	eff->latest = NULL;
 	return 0;
 }
 
@@ -123,9 +130,7 @@ static void ffpl_destroy_rq(struct ff_device *ff)
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		struct ffpl_effect *eff = &priv->effects[idx];
 
-		kfree(eff->active);
-		if (eff->active != eff->latest)
-			kfree(eff->latest);
+		kfree(eff->latest);
 	}
 	kfree(priv->effects);
 	kfree(priv);
@@ -175,10 +180,8 @@ static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struc
 	spin_lock_irq(&dev->event_lock);
 
 
-	/* Latest effect is not in use, free it */
-	if (eff->latest != eff->active)
-		kfree(eff->latest);
 	/* Copy the new effect to the "latest" slot */
+	kfree(eff->latest);
 	eff->latest = kmemdup(effect, sizeof(struct ff_effect), GFP_KERNEL);
 
 	if (eff->state != FFPL_EMPTY) {
