@@ -84,7 +84,6 @@ static int ffpl_update_effect(struct klgd_plugin_private *priv, struct klgd_comm
 	struct input_dev *dev = priv->dev;
 	union ffpl_control_data data;
 	int ret;
-	enum ffpl_control_command cmd;
 
 	if (!eff->uploaded_to_device)
 		return ffpl_start_effect(priv, s, eff);
@@ -108,7 +107,7 @@ static int ffpl_upload_effect(struct klgd_plugin_private *priv, struct klgd_comm
 		goto set;
 
 	data.effect = eff->latest;
-	ret = priv->control(dev, s, FFPL_EMP_TO_SRT, data);
+	ret = priv->control(dev, s, FFPL_EMP_TO_UPL, data);
 	if (ret)
 		return ret;
 	eff->uploaded_to_device = true;
