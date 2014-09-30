@@ -27,6 +27,34 @@ static int klgdff_erase(struct klgd_command_stream *s, const struct ff_effect *e
 	return klgd_append_cmd(s, c);
 }
 
+static int klgdff_owr_start(struct klgd_command_stream *s, const struct ff_effect *effect, const struct ff_effect *old_effect)
+{
+	char *text = kasprintf(GFP_KERNEL, "Overwriting effect to STARTED state, type %d, id %d, old type %d", effect->type, effect->id, old_effect->type);
+	size_t len = strlen(text);
+	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+
+	if (!c)
+		return -ENOMEM;
+
+	memcpy(c->bytes, text, len);
+	kfree(text);
+	return klgd_append_cmd(s, c);
+}
+
+static int klgdff_owr_upload(struct klgd_command_stream *s, const struct ff_effect *effect, const struct ff_effect *old_effect)
+{
+	char *text = kasprintf(GFP_KERNEL, "Overwriting effect to UPLOADED state, type %d, id %d, old type %d", effect->type, effect->id, old_effect->type);
+	size_t len = strlen(text);
+	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+
+	if (!c)
+		return -ENOMEM;
+
+	memcpy(c->bytes, text, len);
+	kfree(text);
+	return klgd_append_cmd(s, c);
+}
+
 static int klgdff_er_stop(struct klgd_command_stream *s, const struct ff_effect *effect)
 {
 	char *text = kasprintf(GFP_KERNEL, "Stopping and erasing effect, type %d, id %d", effect->type, effect->id);
@@ -119,37 +147,56 @@ int klgdff_callback(void *data, const struct klgd_command_stream *s)
 	for (idx = 0; idx < s->count; idx++)
 		printk(KERN_NOTICE "KLGDTM - EFF %s\n", s->commands[idx]->bytes);
 
-	usleep_range(7500, 8500);
+	/* Simulate default USB polling rate of 125 Hz */
+	/*usleep_range(7500, 8500);*/
+	/* Long delay to test more complicated steps */
+	usleep_range(25000, 35000);
 
 	return 0;
 }
 
 int klgdff_control(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data)
 {
+	if (!s)
+		return -EINVAL;
+
+	if (!data.effects.cur) {
+		printk(KERN_WARNING "KLGDTM - NULL effect, this _cannot_ happen!\n");
+		return -EINVAL;
+	}
+
 	switch (cmd) {
 	case FFPL_EMP_TO_UPL:
-		return klgdff_upload(s, data.effect);
+		return klgdff_upload(s, data.effects.cur);
 		break;
 	case FFPL_UPL_TO_SRT:
-		return klgdff_start(s, data.effect);
+		return klgdff_start(s, data.effects.cur);
 		break;
 	case FFPL_SRT_TO_UPL:
-		return klgdff_stop(s, data.effect);
+		return klgdff_stop(s, data.effects.cur);
 		break;
 	case FFPL_UPL_TO_EMP:
-		return klgdff_erase(s, data.effect);
+		return klgdff_erase(s, data.effects.cur);
 		break;
 	case FFPL_SRT_TO_UDT:
-		return klgdff_update(s, data.effect);
+		return klgdff_update(s, data.effects.cur);
 		break;
-	/* "Uploadless" commands */
+	/* "Uploadless/eraseless" commands */
 	case FFPL_EMP_TO_SRT:
-		return klgdff_up_start(s, data.effect);
+		return klgdff_up_start(s, data.effects.cur);
 		break;
 	case FFPL_SRT_TO_EMP:
-		return klgdff_er_stop(s, data.effect);
+		return klgdff_er_stop(s, data.effects.cur);
+		break;
+	/* "Direct" replacing commands */
+	case FFPL_OWR_TO_SRT:
+		return klgdff_owr_start(s, data.effects.cur, data.effects.old);
+		break;
+        case FFPL_OWR_TO_UPL:
+		return klgdff_owr_upload(s, data.effects.cur, data.effects.old);
 		break;
 	default:
+		printk(KERN_NOTICE "KLGDTM - Unhandled command\n");
 		break;
 	}
 
@@ -201,7 +248,7 @@ static int __init klgdff_init(void)
 	input_set_abs_params(dev, ABS_Y, -0x7fff, 0x7fff, 0, 0);
 
 	ret = ffpl_init_plugin(&ff_plugin, dev, EFFECT_COUNT, ffbits,
-			       FFPL_ERASE_WHEN_STOPPED,
+			       FFPL_UPLOAD_WHEN_STARTED | FFPL_REPLACE_STARTED,
 			       klgdff_control);
 	if (ret) {
 		printk(KERN_ERR "KLGDFF: Cannot init plugin\n");

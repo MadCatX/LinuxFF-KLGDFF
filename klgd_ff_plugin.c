@@ -2,7 +2,7 @@
 #include <linux/slab.h>
 
 static bool ffpl_has_gain(const struct ff_effect *eff);
-static bool ffpl_replace_effect(const struct ff_effect *ac_eff, const struct ff_effect *la_eff);
+static bool ffpl_needs_replacing(const struct ff_effect *ac_eff, const struct ff_effect *la_eff);
 
 static int ffpl_erase_effect(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff)
 {
@@ -11,17 +11,36 @@ static int ffpl_erase_effect(struct klgd_plugin_private *priv, struct klgd_comma
 		union ffpl_control_data data;
 		int ret;
 
-		data.effect = eff->active;
+		data.effects.cur = &eff->active;
+		data.effects.old = NULL;
 		ret = priv->control(dev, s, FFPL_UPL_TO_EMP, data);
 		if (ret)
 			return ret;
 	}
 
-	kfree(eff->active);
-	eff->active = NULL;
 	eff->state = FFPL_EMPTY;
 	eff->uploaded_to_device = false;
 	return 0;
+}
+
+static int ffpl_replace_effect(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff,
+			       const enum ffpl_control_command cmd)
+{
+	struct input_dev *dev = priv->dev;
+	union ffpl_control_data data;
+	int ret;
+
+	data.effects.cur = &eff->latest;
+	data.effects.old = &eff->active;
+	ret = priv->control(dev, s, cmd, data);
+	if (!ret) {
+		eff->active = eff->latest;
+		eff->state = (cmd == FFPL_OWR_TO_UPL) ? FFPL_UPLOADED : FFPL_STARTED;
+		eff->replace = false;
+		eff->change = FFPL_DONT_TOUCH;
+		return 0;
+	}
+	return ret;
 }
 
 static int ffpl_start_effect(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff)
@@ -31,7 +50,8 @@ static int ffpl_start_effect(struct klgd_plugin_private *priv, struct klgd_comma
 	int ret;
 	enum ffpl_control_command cmd;
 
-	data.effect = eff->active;
+	data.effects.cur = &eff->active;
+	data.effects.old = NULL;
 	if (priv->upload_when_started) {
 		if (eff->uploaded_to_device)
 			cmd = FFPL_UPL_TO_SRT;
@@ -64,7 +84,8 @@ static int ffpl_stop_effect(struct klgd_plugin_private *priv, struct klgd_comman
 	int ret;
 	enum ffpl_control_command cmd;
 
-	data.effect = eff->active;
+	data.effects.cur = &eff->active;
+	data.effects.old = NULL;
 	if (priv->erase_when_stopped || (priv->has_srt_to_emp && eff->change == FFPL_TO_ERASE))
 		cmd = FFPL_SRT_TO_EMP;
 	else
@@ -88,34 +109,32 @@ static int ffpl_update_effect(struct klgd_plugin_private *priv, struct klgd_comm
 	if (!eff->uploaded_to_device)
 		return ffpl_start_effect(priv, s, eff);
 
-	data.effect = eff->latest;
+	data.effects.cur = &eff->latest;
+	data.effects.old = NULL;
 	ret = priv->control(dev, s, FFPL_SRT_TO_UDT, data);
 	if (ret)
 		return ret;
 	eff->active = eff->latest;
-	eff->latest = NULL;
 	return 0;
 }
 
 static int ffpl_upload_effect(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff)
 {
-	struct input_dev *dev = priv->dev;
-	union ffpl_control_data data;
-	int ret;
+	if (!priv->upload_when_started) {
+		struct input_dev *dev = priv->dev;
+		union ffpl_control_data data;
+		int ret;
 
-	if (priv->upload_when_started)
-		goto set;
+		data.effects.cur = &eff->latest;
+		data.effects.old = NULL;
+		ret = priv->control(dev, s, FFPL_EMP_TO_UPL, data);
+		if (ret)
+			return ret;
+		eff->uploaded_to_device = true;
+	}
 
-	data.effect = eff->latest;
-	ret = priv->control(dev, s, FFPL_EMP_TO_UPL, data);
-	if (ret)
-		return ret;
-	eff->uploaded_to_device = true;
-
-set:
 	eff->state = FFPL_UPLOADED;
 	eff->active = eff->latest;
-	eff->latest = NULL;
 	return 0;
 }
 
@@ -124,13 +143,7 @@ static void ffpl_destroy_rq(struct ff_device *ff)
 {	
 	struct klgd_plugin *self = ff->private;
 	struct klgd_plugin_private *priv = self->private;
-	size_t idx;
 
-	for (idx = 0; idx < priv->effect_count; idx++) {
-		struct ffpl_effect *eff = &priv->effects[idx];
-
-		kfree(eff->latest);
-	}
 	kfree(priv->effects);
 	kfree(priv);
 }
@@ -178,13 +191,11 @@ static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struc
 	klgd_lock_plugins(self->plugins_lock);
 	spin_lock_irq(&dev->event_lock);
 
-
 	/* Copy the new effect to the "latest" slot */
-	kfree(eff->latest);
-	eff->latest = kmemdup(effect, sizeof(struct ff_effect), GFP_KERNEL);
+	eff->latest = *effect;
 
 	if (eff->state != FFPL_EMPTY) {
-		if (ffpl_replace_effect(eff->active, eff->latest))
+		if (ffpl_needs_replacing(&eff->active, &eff->latest))
 			eff->replace = true;
 		else {
 			eff->replace = false;
@@ -212,7 +223,7 @@ static void ffpl_set_gain_rq(struct input_dev *dev, u16 gain)
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		struct ffpl_effect *eff = &priv->effects[idx];
 
-		if (ffpl_has_gain(eff->active))
+		if (ffpl_has_gain(&eff->active))
 			eff->change = FFPL_TO_UPDATE;
 	}
 	/* priv->gain = gain;*/
@@ -229,7 +240,6 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 {
 	struct klgd_plugin_private *priv = self->private;
 	struct klgd_command_stream *s;
-	int ret = 0;
 	size_t idx;
 
 	s = klgd_alloc_stream();
@@ -238,31 +248,88 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
   
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		struct ffpl_effect *eff = &priv->effects[idx];
-
-		/* Effect has not been touched since the last update, skip it */
-		if (eff->change == FFPL_DONT_TOUCH)
-			continue;
+		int ret = 0;
 
 		/* Latest effect is of different type than currently active effect,
 		 * remove it from the device and upload the latest one */
 		if (eff->replace) {
-			switch (eff->state) {
-			case FFPL_STARTED:
-				ret = ffpl_stop_effect(priv, s, eff);
-				if (ret)
+			switch (eff->change) {
+			case FFPL_TO_ERASE:
+				switch (eff->state) {
+				case FFPL_STARTED:
+					ret = ffpl_stop_effect(priv, s, eff);
+					if (ret)
+						break;
+				case FFPL_UPLOADED:
+					ret = ffpl_erase_effect(priv, s, eff);
+					/* TODO: Handle error */
+				default:
+					/* Nothing to do - the effect that is replacing the old effect is about to be erased anyway 
+					 * State of the effect to be replaced should also never be EMPTY */
 					break;
-			case FFPL_UPLOADED:
-				ret = ffpl_erase_effect(priv, s, eff);
-				if (ret)
+				}
+				break;
+			case FFPL_TO_UPLOAD:
+			case FFPL_TO_STOP: /* There is no difference between stopping or uploading an effect when we are replacing it */
+				switch (eff->state) {
+				case FFPL_STARTED:
+					/* Overwrite the currently active effect and set it to UPLOADED state */
+					if (priv->has_owr_to_upl) {
+						ret = ffpl_replace_effect(priv, s, eff, FFPL_OWR_TO_UPL);
+						if (ret)
+							break;
+						continue;
+					}
+					ret = ffpl_stop_effect(priv, s, eff);
+					if (ret)
+						break;
+				case FFPL_UPLOADED:
+					ret = ffpl_erase_effect(priv, s, eff);
+					if (ret)
+						break;
+				case FFPL_EMPTY: /* State cannot actually be FFPL_EMPTY becuase only uploaded or started effects have to be replaced like this */
+					ret = ffpl_upload_effect(priv, s, eff);
 					break;
+				}
+				break;
+			case FFPL_TO_START:
+			case FFPL_TO_UPDATE: /* There is no difference between staring or updating an effect when we are replacing it */
+				switch (eff->state) {
+				case FFPL_STARTED:
+					if (priv->has_owr_to_srt) {
+						ret = ffpl_replace_effect(priv, s, eff, FFPL_OWR_TO_SRT);
+						if (ret)
+							break;
+						continue;
+					}
+					ret = ffpl_stop_effect(priv, s, eff);
+					if (ret)
+						break;
+				case FFPL_UPLOADED:
+					ret = ffpl_erase_effect(priv, s, eff);
+					if (ret)
+						break;
+				case FFPL_EMPTY: /* State cannot actually be FFPL_EMPTY - same as above applies */
+					ret = ffpl_upload_effect(priv, s, eff);
+					if (ret)
+						break;
+					ret = ffpl_start_effect(priv, s, eff);
+					break;
+				}
+			case FFPL_DONT_TOUCH:
+				printk(KERN_WARNING "Got FFPL_DONT_TOUCH change for effect that should be replaced - this should not happen!\n");
+				break;
 			default:
+				printk(KERN_WARNING "Unhandled state change while replacing effect\n");
 				break;
 			}
-			eff->replace = false;
-
-			/* Even the new effect is about to be erased */
-			if (eff->change == FFPL_TO_ERASE)
+			if (ret)
+				printk(KERN_WARNING "Error %d while replacing effect %lu\n", ret, idx);
+			else {
+				eff->replace = false;
+				eff->state = FFPL_DONT_TOUCH;
 				continue;
+			}
 		}
 
 		switch (eff->change) {
@@ -281,15 +348,9 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 		case FFPL_TO_START:
 			switch (eff->state) {
 			case FFPL_EMPTY:
-				if (priv->has_emp_to_srt) {
-					ret = ffpl_start_effect(priv, s, eff);
-					break;
-				}
 				ret = ffpl_upload_effect(priv, s, eff);
 				if (ret)
 					break;
-				ret = ffpl_start_effect(priv, s, eff);
-				break;
 			case FFPL_UPLOADED:
 				ret = ffpl_start_effect(priv, s, eff);
 				break;
@@ -326,13 +387,18 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 			break;
 		case FFPL_TO_UPDATE:
 			ret = ffpl_update_effect(priv, s, eff);
+			break;
+		case FFPL_DONT_TOUCH:
+			continue;
 		default:
 			pr_debug("Unhandled state\n");
 		}
 
 		/* TODO: Handle errors */
-
-		eff->change = FFPL_DONT_TOUCH;
+		if (ret)
+			printk(KERN_WARNING "Error %d while processing effect %lu\n", ret, idx);
+		else
+			eff->change = FFPL_DONT_TOUCH;
 	}
 
 	return s;
@@ -415,6 +481,12 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 		ret = -ENOMEM;
 		goto err_out2;
 	}
+	for (idx = 0; idx < effect_count; idx++) {
+		priv->effects[idx].replace = false;
+		priv->effects[idx].uploaded_to_device = false;
+		priv->effects[idx].state = FFPL_EMPTY;
+		priv->effects[idx].change = FFPL_DONT_TOUCH;
+	}
 
 	self->deinit = ffpl_deinit;
 	self->get_commands = ffpl_get_commands;
@@ -446,6 +518,14 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 		priv->erase_when_stopped = true;
 		printk("KLGDFF: Using ERASE WHEN STOPPED\n");
 	}
+	if (FFPL_REPLACE_UPLOADED & flags) {
+		priv->has_owr_to_upl = true;
+		printk("KLGDFF: Using REPLACE UPLOADED\n");
+	}
+	if (FFPL_REPLACE_STARTED & flags) {
+		priv->has_owr_to_srt = true;
+		printk("KLGDFF: Using REPLACE STARTED\n");
+	}
 
 	set_bit(FF_GAIN, dev->ffbit);
 	for (idx = 0; idx <= (FF_EFFECT_MAX - FF_EFFECT_MIN); idx++) {
@@ -463,15 +543,20 @@ err_out1:
 	return ret;
 }
 
-static bool ffpl_replace_effect(const struct ff_effect *ac_eff, const struct ff_effect *la_eff)
+static bool ffpl_needs_replacing(const struct ff_effect *ac_eff, const struct ff_effect *la_eff)
 {
-	if (ac_eff->type != la_eff->type)
+	if (ac_eff->type != la_eff->type) {
+		printk(KERN_NOTICE "KLGDFF - Effects are of different type - replacing (%d x %d)\n", ac_eff->type, la_eff->type);
 		return true;
-
-	if (ac_eff->type == FF_PERIODIC) {
-		if (ac_eff->u.periodic.waveform != la_eff->u.periodic.waveform)
-			return true;
 	}
 
+	if (ac_eff->type == FF_PERIODIC) {
+		if (ac_eff->u.periodic.waveform != la_eff->u.periodic.waveform) {
+			printk(KERN_NOTICE "KLGDFF - Effects have different waveforms - replacing\n");
+			return true;
+		}
+	}
+
+	printk(KERN_NOTICE "KLGDFF - Effect does not have to be replaced, updating\n");
 	return false;
 }

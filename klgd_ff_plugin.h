@@ -8,6 +8,8 @@
 #define FFPL_HAS_SRT_TO_EMP BIT(1) /* Device supports direct "stop and erase" */
 #define FFPL_UPLOAD_WHEN_STARTED BIT(2) /* Upload effects only when they are started - this implies HAS_EMP_TO_SRT */
 #define FFPL_ERASE_WHEN_STOPPED BIT(3) /* Erases effect from device when it is stopped - this implies HAS_SRT_TO_EMP */
+#define FFPL_REPLACE_UPLOADED BIT(4) /* Device can accept a new effect to UPLOADED state without the need to explicitly stop and erase the previously uploaded effect beforehand */
+#define FFPL_REPLACE_STARTED BIT(5) /* Device can accept a new effect to STARTED state without the need to explicitly stop and erase the previously uploaded effect beforehand */
 
 enum ffpl_control_command {
 	/* Force feedback state transitions */
@@ -18,11 +20,18 @@ enum ffpl_control_command {
 	FFPL_SRT_TO_UDT, /* Update started effect */
 	/* Optional force feedback state transitions */
 	FFPL_EMP_TO_SRT, /* Upload and start effect */
-	FFPL_SRT_TO_EMP  /* Stop and erase started effect */
+	FFPL_SRT_TO_EMP, /* Stop and erase started effect */
+	FFPL_OWR_TO_UPL, /* Overwrite an effect with a new one and set its state to UPLOADED */
+	FFPL_OWR_TO_SRT	 /* Overwrite an effect with a new one and set its state to STARTED */
+};
+
+struct ffpl_effects {
+	const struct ff_effect *cur;  /* Pointer to the effect that is being uploaded/started/stopped/erased */
+	const struct ff_effect *old;  /* Pointer to the currently active effect. Valid only with OWR_* commands, otherwise NULL */
 };
 
 union ffpl_control_data {
-	const struct ff_effect *effect;
+	struct ffpl_effects effects;
 	u16 ac_magnitude;
 	u16 gain;
 };

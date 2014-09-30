@@ -18,8 +18,8 @@ enum ffpl_state {
 };
 
 struct ffpl_effect {
-	struct ff_effect *active;	/* Last effect submitted to device */
-	struct ff_effect *latest;	/* Last effect submitted to us by userspace */
+	struct ff_effect active;	/* Last effect submitted to device */
+	struct ff_effect latest;	/* Last effect submitted to us by userspace */
 	enum ffpl_st_change change;	/* State to which the effect shall be put */
 	enum ffpl_state state;		/* State of the active effect */
 	bool replace;			/* Active effect has to be replaced => active effect shall be erased and latest uploaded */
@@ -31,10 +31,13 @@ struct klgd_plugin_private {
 	unsigned long supported_effects;
 	size_t effect_count;
 	struct input_dev *dev;
+	int (*control)(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data);
 	/* Optional device capabilities */
 	bool has_emp_to_srt;
 	bool has_srt_to_emp;
 	bool upload_when_started;
 	bool erase_when_stopped;
-	int (*control)(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data);
+	bool has_owr_to_upl;
+	bool has_owr_to_srt;
+	u32 padding:26;
 };
