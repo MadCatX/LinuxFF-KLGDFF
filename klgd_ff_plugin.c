@@ -342,7 +342,7 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 				printk(KERN_WARNING "Error %d while replacing effect %lu\n", ret, idx);
 			else {
 				eff->replace = false;
-				eff->state = FFPL_DONT_TOUCH;
+				eff->change = FFPL_DONT_TOUCH;
 				continue;
 			}
 		}
