@@ -248,7 +248,7 @@ static int __init klgdff_init(void)
 	input_set_abs_params(dev, ABS_Y, -0x7fff, 0x7fff, 0, 0);
 
 	ret = ffpl_init_plugin(&ff_plugin, dev, EFFECT_COUNT, ffbits,
-			       FFPL_UPLOAD_WHEN_STARTED | FFPL_REPLACE_STARTED,
+			       FFPL_HAS_EMP_TO_SRT | FFPL_REPLACE_STARTED,
 			       klgdff_control);
 	if (ret) {
 		printk(KERN_ERR "KLGDFF: Cannot init plugin\n");

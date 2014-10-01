@@ -201,9 +201,10 @@ static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struc
 	eff->latest = *effect;
 
 	if (eff->state != FFPL_EMPTY) {
-		if (ffpl_needs_replacing(&eff->active, &eff->latest))
+		if (ffpl_needs_replacing(&eff->active, &eff->latest)) {
 			eff->replace = true;
-		else {
+			eff->change = FFPL_TO_UPLOAD;
+		} else {
 			eff->replace = false;
 			eff->change = FFPL_TO_UPDATE;
 		}
@@ -322,6 +323,7 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 					ret = ffpl_start_effect(priv, s, eff);
 					break;
 				}
+				break;
 			case FFPL_DONT_TOUCH:
 				printk(KERN_WARNING "Got FFPL_DONT_TOUCH change for effect that should be replaced - this should not happen!\n");
 				break;
