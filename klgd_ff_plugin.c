@@ -359,10 +359,11 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 		case FFPL_TO_START:
 			switch (eff->state) {
 			case FFPL_EMPTY:
-				if (priv->has_emp_to_srt)
+				if (priv->has_emp_to_srt) {
 					ret = ffpl_start_effect(priv, s, eff);
-				else
-					ret = ffpl_upload_effect(priv, s, eff);
+					break;
+				}
+				ret = ffpl_upload_effect(priv, s, eff);
 				if (ret)
 					break;
 			case FFPL_UPLOADED:
