@@ -50,9 +50,9 @@ static int ffpl_start_effect(struct klgd_plugin_private *priv, struct klgd_comma
 	int ret;
 	enum ffpl_control_command cmd;
 
-	data.effects.cur = &eff->active;
 	data.effects.old = NULL;
-	if (priv->upload_when_started) {
+	if (priv->upload_when_started && eff->state == FFPL_UPLOADED) {
+		data.effects.cur = &eff->active;
 		if (eff->uploaded_to_device)
 			cmd = FFPL_UPL_TO_SRT;
 		else
@@ -63,13 +63,19 @@ static int ffpl_start_effect(struct klgd_plugin_private *priv, struct klgd_comma
 			return ret;
 	} else {
 		/* This can happen only if device supports "upload and start" */
-		if (eff->state == FFPL_EMPTY)
+		if (eff->state == FFPL_EMPTY) {
+			data.effects.cur = &eff->latest;
 			cmd = FFPL_EMP_TO_SRT;
-		else
+		} else {
+			data.effects.cur = &eff->active;
 			cmd = FFPL_UPL_TO_SRT;
+		}
+
 		ret = priv->control(dev, s, cmd, data);
 		if (ret)
 			return ret;
+		if (cmd == FFPL_EMP_TO_SRT)
+			eff->active = eff->latest;
 	}
 
 	eff->uploaded_to_device = true; /* Needed of devices that support "upload and start" but don't use "upload when started" */
@@ -348,7 +354,10 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 		case FFPL_TO_START:
 			switch (eff->state) {
 			case FFPL_EMPTY:
-				ret = ffpl_upload_effect(priv, s, eff);
+				if (priv->has_emp_to_srt)
+					ret = ffpl_start_effect(priv, s, eff);
+				else
+					ret = ffpl_upload_effect(priv, s, eff);
 				if (ret)
 					break;
 			case FFPL_UPLOADED:
