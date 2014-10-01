@@ -125,9 +125,9 @@ static int klgdff_upload(struct klgd_command_stream *s, const struct ff_effect *
 	return klgd_append_cmd(s, c);
 }
 
-static int klgdff_up_start(struct klgd_command_stream *s, const struct ff_effect *effect)
+static int klgdff_up_start(struct klgd_command_stream *s, const struct ff_effect *effect, const int repeat)
 {
-	char *text = kasprintf(GFP_KERNEL, "Uploading and starting effect, type %d, id %d", effect->type, effect->id);
+	char *text = kasprintf(GFP_KERNEL, "Uploading and starting effect, type %d, id %d, repeat %d", effect->type, effect->id, repeat);
 	size_t len = strlen(text);
 	struct klgd_command *c = klgd_alloc_cmd(len + 1);
 
@@ -183,7 +183,7 @@ int klgdff_control(struct input_dev *dev, struct klgd_command_stream *s, const e
 		break;
 	/* "Uploadless/eraseless" commands */
 	case FFPL_EMP_TO_SRT:
-		return klgdff_up_start(s, data.effects.cur);
+		return klgdff_up_start(s, data.effects.cur, data.effects.repeat);
 		break;
 	case FFPL_SRT_TO_EMP:
 		return klgdff_er_stop(s, data.effects.cur);

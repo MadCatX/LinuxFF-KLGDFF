@@ -260,11 +260,13 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 		struct ffpl_effect *eff = &priv->effects[idx];
 		int ret = 0;
 
+		printk(KERN_NOTICE "KLGDFF - Processing effect %lu\n", idx);
 		/* Latest effect is of different type than currently active effect,
 		 * remove it from the device and upload the latest one */
 		if (eff->replace) {
 			switch (eff->change) {
 			case FFPL_TO_ERASE:
+				printk("KLGDFF - Rpl chg - TO_ERASE\n");
 				switch (eff->state) {
 				case FFPL_STARTED:
 					ret = ffpl_stop_effect(priv, s, eff);
@@ -281,6 +283,7 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 				break;
 			case FFPL_TO_UPLOAD:
 			case FFPL_TO_STOP: /* There is no difference between stopping or uploading an effect when we are replacing it */
+				printk("KLGDFF - Rpl chg - TO_UPLOAD/TO_STOP\n");
 				switch (eff->state) {
 				case FFPL_STARTED:
 					/* Overwrite the currently active effect and set it to UPLOADED state */
@@ -304,6 +307,7 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 				break;
 			case FFPL_TO_START:
 			case FFPL_TO_UPDATE: /* There is no difference between staring or updating an effect when we are replacing it */
+				printk("KLGDFF - Rpl chg - TO_START/TO_UPDATE\n");
 				switch (eff->state) {
 				case FFPL_STARTED:
 					if (priv->has_owr_to_srt) {
@@ -345,6 +349,7 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 
 		switch (eff->change) {
 		case FFPL_TO_UPLOAD:
+			printk(KERN_INFO "KLGDFF - Chg TO_UPLOAD\n");
 			switch (eff->state) {
 			case FFPL_EMPTY:
 				ret = ffpl_upload_effect(priv, s, eff);
@@ -357,6 +362,7 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 			}
 			break;
 		case FFPL_TO_START:
+			printk(KERN_INFO "KLGDFF - Chg TO_START\n");
 			switch (eff->state) {
 			case FFPL_EMPTY:
 				if (priv->has_emp_to_srt) {
@@ -374,6 +380,7 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 			}
 			break;
 		case FFPL_TO_STOP:
+			printk(KERN_INFO "KLGDFF - Chg TO_STOP\n");
 			switch (eff->state) {
 			case FFPL_STARTED:
 				ret = ffpl_stop_effect(priv, s, eff);
@@ -386,6 +393,7 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 			}
 			break;
 		case FFPL_TO_ERASE:
+			printk(KERN_INFO "KLGDFF - Chg TO_ERASE\n");
 			switch (eff->state) {
 			case FFPL_UPLOADED:
 				ret = ffpl_erase_effect(priv, s, eff);
@@ -401,9 +409,11 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 			}
 			break;
 		case FFPL_TO_UPDATE:
+			printk(KERN_INFO "KLGDFF - Chg TO_UPDATE\n");
 			ret = ffpl_update_effect(priv, s, eff);
 			break;
 		case FFPL_DONT_TOUCH:
+			printk(KERN_INFO "KLGDFF - Chg - NO CHANGE\n");
 			continue;
 		default:
 			pr_debug("Unhandled state\n");
