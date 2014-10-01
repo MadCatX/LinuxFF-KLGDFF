@@ -32,6 +32,7 @@ static int ffpl_replace_effect(struct klgd_plugin_private *priv, struct klgd_com
 
 	data.effects.cur = &eff->latest;
 	data.effects.old = &eff->active;
+	data.effects.repeat = eff->repeat;
 	ret = priv->control(dev, s, cmd, data);
 	if (!ret) {
 		eff->active = eff->latest;
@@ -51,6 +52,7 @@ static int ffpl_start_effect(struct klgd_plugin_private *priv, struct klgd_comma
 	enum ffpl_control_command cmd;
 
 	data.effects.old = NULL;
+	data.effects.repeat = eff->repeat;
 	if (priv->upload_when_started && eff->state == FFPL_UPLOADED) {
 		data.effects.cur = &eff->active;
 		if (eff->uploaded_to_device)
@@ -177,9 +179,10 @@ static int ffpl_playback_rq(struct input_dev *dev, int effect_id, int value)
 
 	klgd_lock_plugins(self->plugins_lock);
 
-	if (value)
+	if (value) {
 		eff->change = FFPL_TO_START;
-	else
+		eff->repeat = value;
+	} else
 		eff->change = FFPL_TO_STOP;
 
 	klgd_unlock_plugins_sched(self->plugins_lock);

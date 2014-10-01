@@ -28,6 +28,7 @@ enum ffpl_control_command {
 struct ffpl_effects {
 	const struct ff_effect *cur;  /* Pointer to the effect that is being uploaded/started/stopped/erased */
 	const struct ff_effect *old;  /* Pointer to the currently active effect. Valid only with OWR_* commands, otherwise NULL */
+	int repeat; /* How many times to repeat playback - valid only with *_SRT commands */
 };
 
 union ffpl_control_data {

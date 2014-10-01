@@ -20,6 +20,7 @@ enum ffpl_state {
 struct ffpl_effect {
 	struct ff_effect active;	/* Last effect submitted to device */
 	struct ff_effect latest;	/* Last effect submitted to us by userspace */
+	int repeat;			/* How many times to repeat an effect - set in playback_rq */
 	enum ffpl_st_change change;	/* State to which the effect shall be put */
 	enum ffpl_state state;		/* State of the active effect */
 	bool replace;			/* Active effect has to be replaced => active effect shall be erased and latest uploaded */

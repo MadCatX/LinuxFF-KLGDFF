@@ -27,9 +27,9 @@ static int klgdff_erase(struct klgd_command_stream *s, const struct ff_effect *e
 	return klgd_append_cmd(s, c);
 }
 
-static int klgdff_owr_start(struct klgd_command_stream *s, const struct ff_effect *effect, const struct ff_effect *old_effect)
+static int klgdff_owr_start(struct klgd_command_stream *s, const struct ff_effect *effect, const struct ff_effect *old_effect, const int repeat)
 {
-	char *text = kasprintf(GFP_KERNEL, "Overwriting effect to STARTED state, type %d, id %d, old type %d", effect->type, effect->id, old_effect->type);
+	char *text = kasprintf(GFP_KERNEL, "Overwriting effect to STARTED state, type %d, id %d, old type %d, repeat %d", effect->type, effect->id, old_effect->type, repeat);
 	size_t len = strlen(text);
 	struct klgd_command *c = klgd_alloc_cmd(len + 1);
 
@@ -69,9 +69,9 @@ static int klgdff_er_stop(struct klgd_command_stream *s, const struct ff_effect 
 	return klgd_append_cmd(s, c);
 }
 
-static int klgdff_start(struct klgd_command_stream *s, const struct ff_effect *effect)
+static int klgdff_start(struct klgd_command_stream *s, const struct ff_effect *effect, const int repeat)
 {
-	char *text = kasprintf(GFP_KERNEL, "Playing effect, type %d, id %d", effect->type, effect->id);
+	char *text = kasprintf(GFP_KERNEL, "Playing effect, type %d, id %d, repeat %d", effect->type, effect->id, repeat);
 	size_t len = strlen(text);
 	struct klgd_command *c = klgd_alloc_cmd(len + 1);
 
@@ -170,7 +170,7 @@ int klgdff_control(struct input_dev *dev, struct klgd_command_stream *s, const e
 		return klgdff_upload(s, data.effects.cur);
 		break;
 	case FFPL_UPL_TO_SRT:
-		return klgdff_start(s, data.effects.cur);
+		return klgdff_start(s, data.effects.cur, data.effects.repeat);
 		break;
 	case FFPL_SRT_TO_UPL:
 		return klgdff_stop(s, data.effects.cur);
@@ -190,7 +190,7 @@ int klgdff_control(struct input_dev *dev, struct klgd_command_stream *s, const e
 		break;
 	/* "Direct" replacing commands */
 	case FFPL_OWR_TO_SRT:
-		return klgdff_owr_start(s, data.effects.cur, data.effects.old);
+		return klgdff_owr_start(s, data.effects.cur, data.effects.old, data.effects.repeat);
 		break;
         case FFPL_OWR_TO_UPL:
 		return klgdff_owr_upload(s, data.effects.cur, data.effects.old);
