@@ -145,7 +145,7 @@ int klgdff_callback(void *data, const struct klgd_command_stream *s)
 
 	printk(KERN_NOTICE "KLGDTM - EFF...\n");
 	for (idx = 0; idx < s->count; idx++)
-		printk(KERN_NOTICE "KLGDTM - EFF %s\n", s->commands[idx]->bytes);
+		printk(KERN_NOTICE "KLGDFF-TD: EFF %s\n", s->commands[idx]->bytes);
 
 	/* Simulate default USB polling rate of 125 Hz */
 	/*usleep_range(7500, 8500);*/
@@ -161,7 +161,7 @@ int klgdff_control(struct input_dev *dev, struct klgd_command_stream *s, const e
 		return -EINVAL;
 
 	if (!data.effects.cur) {
-		printk(KERN_WARNING "KLGDTM - NULL effect, this _cannot_ happen!\n");
+		printk(KERN_WARNING "KLGDFF-TM: NULL effect, this _cannot_ happen!\n");
 		return -EINVAL;
 	}
 
@@ -196,7 +196,7 @@ int klgdff_control(struct input_dev *dev, struct klgd_command_stream *s, const e
 		return klgdff_owr_upload(s, data.effects.cur, data.effects.old);
 		break;
 	default:
-		printk(KERN_NOTICE "KLGDTM - Unhandled command\n");
+		printk(KERN_NOTICE "KLGDFF-TD - Unhandled command\n");
 		break;
 	}
 
@@ -222,14 +222,14 @@ static int __init klgdff_init(void)
 
 	ret = klgd_init(&klgd, NULL, klgdff_callback, 1);
 	if (ret) {
-		printk(KERN_ERR "Cannot initialize KLGD\n");
+		printk(KERN_ERR "KLGDFF-TD: Cannot initialize KLGD\n");
 		goto errout_klgd;
 	}
 
 	dev = input_allocate_device();
 	if (!dev) {
 		ret = -ENODEV;
-		printk(KERN_ERR "Cannot allocate input device\n");
+		printk(KERN_ERR "KLGDFF-TD: Cannot allocate input device\n");
 		goto errout_idev;
 	}
 	dev->id.bustype = BUS_VIRTUAL;
@@ -251,24 +251,24 @@ static int __init klgdff_init(void)
 			       FFPL_HAS_EMP_TO_SRT | FFPL_REPLACE_STARTED,
 			       klgdff_control);
 	if (ret) {
-		printk(KERN_ERR "KLGDFF: Cannot init plugin\n");
+		printk(KERN_ERR "KLGDFF-TD: Cannot init plugin\n");
 		goto errout_idev;
 	}
       	ret = input_register_device(dev);
 	if (ret) {
-		printk(KERN_ERR "Cannot register input device\n");
+		printk(KERN_ERR "KLGDFF-TD: Cannot register input device\n");
 		goto errout_regdev;
 	}
 	
 	ret = klgd_register_plugin(&klgd, 0, ff_plugin, true);
 	if (ret) {
-		printk(KERN_ERR "KLGDFF: Cannot register plugin\n");
+		printk(KERN_ERR "KLGDFF-TD: Cannot register plugin\n");
 		goto errout_idev;
 	}
 
 
 
-	printk(KERN_NOTICE "KLGD FF sample module loaded\n");
+	printk(KERN_NOTICE "KLGDFF-TD: Sample module loaded\n");
 	return 0;
 
 errout_regdev:

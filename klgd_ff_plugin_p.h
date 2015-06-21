@@ -29,6 +29,7 @@ struct ffpl_effect {
 
 struct klgd_plugin_private {
 	struct ffpl_effect *effects;
+	struct ffpl_effect combined_effect;
 	unsigned long supported_effects;
 	size_t effect_count;
 	struct input_dev *dev;
