@@ -131,6 +131,10 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 			needs_update = true;
 			printk(KERN_NOTICE "KLGDFF: Altered combinable effect, total active effects %lu\n", active_effects);
 			break;
+		case FFPL_TO_UPLOAD:
+			eff->state = FFPL_UPLOADED;
+			printk(KERN_NOTICE "KLGDFF: Combinable effect to upload, marking as uploaded\n");
+			break;
 		default:
 			needs_update = true;
 			eff->state = FFPL_EMPTY;
@@ -303,7 +307,7 @@ static int ffpl_upload_effect(struct klgd_plugin_private *priv, struct klgd_comm
 
 /* Destroy request - input device is being destroyed */
 static void ffpl_destroy_rq(struct ff_device *ff)
-{	
+{
 	struct klgd_plugin *self = ff->private;
 	struct klgd_plugin_private *priv = self->private;
 
@@ -412,7 +416,7 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 	s = klgd_alloc_stream();
 	if (!s)
 		return NULL; /* TODO: Error handling */
-  
+
 	ret = ffpl_handle_combinable_effects(priv, s);
 	if (ret)
 		printk(KERN_WARNING "KLGDFF: Cannot process combinable effects, ret %d\n", ret);
@@ -457,7 +461,7 @@ static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klg
 				    const bool ignore_combined)
 {
 	int ret;
-	
+
 	/* Latest effect is of different type than currently active effect,
 	 * remove it from the device and upload the latest one */
 	if (eff->replace) {
@@ -474,7 +478,7 @@ static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klg
 				if (ret)
 					break;
 			default:
-				/* Nothing to do - the effect that is replacing the old effect is about to be erased anyway 
+				/* Nothing to do - the effect that is replacing the old effect is about to be erased anyway
 				 * State of the effect to be replaced should also never be EMPTY */
 				ret = 0;
 				break;
@@ -682,7 +686,7 @@ static int ffpl_init(struct klgd_plugin *self)
 
 	return 0;
 }
-		
+
 /* Initialize the plugin */
 int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const size_t effect_count,
 		     const unsigned long supported_effects,
@@ -691,7 +695,7 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 {
 	struct klgd_plugin *self;
 	struct klgd_plugin_private *priv;
-	int ret, idx;	
+	int ret, idx;
 
 	self = kzalloc(sizeof(struct klgd_plugin), GFP_KERNEL);
 	if (!self)
