@@ -9,59 +9,91 @@ static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klg
 static bool ffpl_has_gain(const struct ff_effect *eff);
 static bool ffpl_needs_replacing(const struct ff_effect *ac_eff, const struct ff_effect *la_eff);
 
-static u16 ffpl_degrees_from_x_y(const int x, const int y)
-{
-	u16 degrees;
-	/* Precalculated tan() values expanded by FRAC_N */
-	static const unsigned int precalc_tan[] = {0, 4, 8, 13, 17, 22, 26, 31, 35, 40,					/* 0 - 9 deg */
-						   45, 49, 54, 59, 63, 68, 73, 78, 83, 88,				/* 10 - 19 deg */
-						   93, 98, 108, 113, 119, 124, 130, 136, 141,				/* 20 - 29 deg */
-						   147, 153, 159, 166, 172, 179, 185, 192, 200, 207,			/* 30 - 39 deg */
-						   214, 222, 230, 238, 247, 255, 265, 274, 284, 294,			/* 40 - 49 deg */
-						   305, 316, 327, 339, 352, 365, 379, 394, 409, 426,			/* 50 - 59 deg */
-						   443, 461, 481, 502, 524, 548, 574, 603, 633, 666,			/* 60 - 69 deg */
-						   703, 743, 787, 837, 892, 955, 1026, 1108, 1204, 1317,		/* 70 - 79 deg */
-						   1451, 1616, 1821, 2084, 2435, 2926, 3660, 4884, 7330, 14666};	/* 80 - 89 deg */
-
-	for (degrees = 0; degrees < ARRAY_SIZE(precalc_tan); degrees++) {
-		unsigned int tan = (abs(y) << FRAC_N) / abs(x);
-		if (tan <= precalc_tan[degrees])
-			return degrees;
-	}
-
-	return 90;
-}
-
-static void ffpl_x_y_to_lvl_dir(const int x, const int y, s16 *level, u16 *direction)
-{
-	const u16 angle = (x == 0) ? 90 : ffpl_degrees_from_x_y(x, y);
-
-	printk(KERN_NOTICE "KLGDFF: Angle = %u\n", angle);
-	*level = int_sqrt(x * x + y * y);
-	/* 1st quadrant */
-	if (x >= 0 && y >= 0)
-		*direction = ((270 - angle) * 0xffff) / 360;
-	/* 2nd quadrant */
-	else if (x < 0 && y >= 0)
-		*direction = ((90 + angle) * 0xffff) / 360;
-	/* 3rd quadrant */
-	else if (x < 0 && y < 0)
-		*direction = ((90 - angle) * 0xffff) / 360;
-	/* 4th quadrant */
-	else if (x > 0 && y < 0)
-		*direction = ((270 + angle) * 0xffff) / 360;
-	else
-		*direction = 0;
-}
-
 static bool ffpl_is_combinable(const struct ff_effect *eff)
 {
 	/* TODO: Proper decision of what is a combinable effect */
 	return eff->type == FF_CONSTANT;
 }
 
+static u16 ffpl_atan_int_octet(const u16 x, const u16 y)
+{
+    u32 result;
 
-bool ffpl_constant_force_to_x_y(const struct ff_effect *eff, int *x, int *y)
+    if (!y)
+        return 0x0000;
+
+    /* 3rd order polynomial approximation beween 0 <= y/x <= 1 */
+    result = y * 0x02e2 / x;
+    result = y * (0x05dc + result) / x;
+    result = y * (0x28be - result) / x;
+
+    return result;
+}
+
+static u16 ffpl_atan_int_quarter(const u16 x, const u16 y)
+{
+    if (x == y)
+        return 0x2000;
+    else if (x > y)
+        return ffpl_atan_int_octet(x, y);
+    else
+        return 0x4000 - ffpl_atan_int_octet(y, x);
+}
+
+
+static void ffpl_x_y_to_lvl_dir(const s32 x, const s32 y, s16 *level, u16 *direction)
+{
+	u16 angle;
+	unsigned long pwr;
+	u32 _x = abs(x);
+	u32 _y = abs(y);
+
+	/* It is necessary to make sure that neither of the coordinates exceeds 0xffff.
+	 */
+	if (abs(x) > 0xffff || abs(y) > 0xffff) {
+		u32 div;
+		u32 divx = _x / 0xfffe;
+		u32 divy = _y / 0xfffe;
+
+		div = (divx > divy) ? divx : divy;
+
+		_x /= div;
+		_y /= div;
+
+		if (_x > 0xffff || _y > 0xffff) {
+			_x >>= 1;
+			_y >>= 1;
+		}
+
+	}
+	angle = (!_x && !_y) ? 0x4000 : ffpl_atan_int_quarter(_x, _y);
+
+
+	/* 1st quadrant */
+	if (x >= 0 && y >= 0)
+		*direction = 0xC000 - angle;
+	/* 2nd quadrant */
+	else if (x < 0 && y >= 0)
+		*direction = 0x4000 + angle;
+	/* 3rd quadrant */
+	else if (x < 0 && y < 0)
+		*direction = 0x4000 - angle;
+	/* 4th quadrant */
+	else if (x > 0 && y < 0)
+		*direction = 0xC000 + angle;
+	else
+		*direction = 0x0000;
+
+	if (abs(x) > 0x7fff || abs(y) > 0x7fff) {
+		*level = 0x7fff;
+		return;
+	}
+
+	pwr = int_sqrt(x * x + y * y);
+	*level = (pwr > 0x7fff) ? 0x7fff : pwr;
+}
+
+bool ffpl_constant_force_to_x_y(const struct ff_effect *eff, s32 *x, s32 *y)
 {
 	int degrees;
 
@@ -80,8 +112,8 @@ static void ffpl_recalc_combined(struct klgd_plugin_private *priv)
 {
 	size_t idx;
 	struct ff_effect *cb_latest = &priv->combined_effect.latest;
-	int x = 0;
-	int y = 0;
+	s32 x = 0;
+	s32 y = 0;
 
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		const struct ffpl_effect *eff = &priv->effects[idx];
@@ -101,7 +133,7 @@ static void ffpl_recalc_combined(struct klgd_plugin_private *priv)
 
 	ffpl_x_y_to_lvl_dir(x, y, &cb_latest->u.constant.level, &cb_latest->direction);
 	cb_latest->type = FF_CONSTANT;
-	printk(KERN_NOTICE "KLGDFF: Resulting combined CF effect > x: %d, y: %d, level: %d, direction: %d\n", x, y, cb_latest->u.constant.level,
+	printk(KERN_NOTICE "KLGDFF: Resulting combined CF effect > x: %d, y: %d, level: %d, direction: %u\n", x, y, cb_latest->u.constant.level,
 	       cb_latest->direction);
 }
 
