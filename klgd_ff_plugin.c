@@ -163,11 +163,16 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 			needs_update = true;
 			printk(KERN_NOTICE "KLGDFF: Altered combinable effect, total active effects %lu\n", active_effects);
 			break;
+		case FFPL_TO_STOP:
+			if (eff->state == FFPL_STARTED)
+				needs_update = true;
 		case FFPL_TO_UPLOAD:
 			eff->state = FFPL_UPLOADED;
-			printk(KERN_NOTICE "KLGDFF: Combinable effect to upload, marking as uploaded\n");
+			printk(KERN_NOTICE "KLGDFF: Combinable effect to upload/stop, marking as uploaded\n");
 			break;
 		default:
+			if (eff->state != FFPL_STARTED)
+				break;
 			needs_update = true;
 			eff->state = FFPL_EMPTY;
 			printk(KERN_NOTICE "KLGDFF: Stopped combinable effect, total active effects %lu\n", active_effects);
