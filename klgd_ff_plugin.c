@@ -156,8 +156,10 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 			return 0;
 		}
 		/* No combinable effects are active, remove the effect from device */
-		printk(KERN_NOTICE "KLGDFF: No combinable effects are active, erase the combined effect from device\n");
-		priv->combined_effect.change = FFPL_TO_ERASE;
+		if (priv->combined_effect.state != FFPL_EMPTY) {
+			printk(KERN_NOTICE "KLGDFF: No combinable effects are active, erase the combined effect from device\n");
+			priv->combined_effect.change = FFPL_TO_ERASE;
+		}
 	}
 
 	return 0;
