@@ -384,9 +384,17 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 			/* Uncombinable effect is about to be replaced by a combinable one */
 			if (ffpl_is_combinable(&eff->latest)) {
 				printk(KERN_NOTICE "KLGDFF: Replacing uncombinable with combinable\n");
-				ret = ffpl_erase_effect(priv, s, eff);
-				if (ret)
-					return ret;
+				switch (eff->state) {
+				case FFPL_STARTED:
+					ret = ffpl_stop_effect(priv, s, eff);
+					if (ret)
+						return ret;
+				default:
+					ret = ffpl_erase_effect(priv, s, eff);
+					if (ret)
+						return ret;
+					break;
+				}
 				eff->replace = false;
 			} else {
 			/* Combinable effect is being replaced by an uncombinable one */
