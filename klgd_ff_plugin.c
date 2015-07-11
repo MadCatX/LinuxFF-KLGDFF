@@ -4,8 +4,7 @@
 
 #define DIR_TO_DEGREES(dir) (360 - ((((dir > 0xc000) ? (u32)dir + 0x4000 - 0xffff : (u32)dir + 0x4000) * 360) / 0xffff))
 
-static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff,
-				    const bool ignore_combined);
+static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff);
 static bool ffpl_has_gain(const struct ff_effect *eff);
 static bool ffpl_needs_replacing(const struct ff_effect *ac_eff, const struct ff_effect *la_eff);
 
@@ -118,88 +117,14 @@ static void ffpl_recalc_combined(struct klgd_plugin_private *priv)
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		const struct ffpl_effect *eff = &priv->effects[idx];
 
-		switch (eff->change) {
-		case FFPL_DONT_TOUCH:
-			if (eff->state != FFPL_STARTED)
-				break;
-		case FFPL_TO_START:
-		case FFPL_TO_UPDATE:
+		if (eff->state == FFPL_STARTED)
 			ffpl_constant_force_to_x_y(&eff->latest, &x, &y);
-			break;
-		default:
-			break;
-		}
 	}
 
 	ffpl_x_y_to_lvl_dir(x, y, &cb_latest->u.constant.level, &cb_latest->direction);
 	cb_latest->type = FF_CONSTANT;
 	printk(KERN_NOTICE "KLGDFF: Resulting combined CF effect > x: %d, y: %d, level: %d, direction: %u\n", x, y, cb_latest->u.constant.level,
 	       cb_latest->direction);
-}
-
-static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, struct klgd_command_stream *s)
-{
-	size_t idx;
-	bool needs_update = false;
-	size_t active_effects = 0;
-
-	for (idx = 0; idx < priv->effect_count; idx++) {
-		struct ffpl_effect *eff = &priv->effects[idx];
-
-		if (!ffpl_is_combinable(&eff->latest))
-			continue;
-
-		switch (eff->change) {
-		case FFPL_DONT_TOUCH:
-			if (eff->state == FFPL_STARTED)
-				active_effects++;
-			printk(KERN_NOTICE "KLGDFF: Unchanged combinable effect, total active effects %lu\n", active_effects);
-			break;
-		case FFPL_TO_START:
-			eff->state = FFPL_STARTED;
-			eff->active = eff->latest;
-		case FFPL_TO_UPDATE:
-			active_effects++;
-			needs_update = true;
-			printk(KERN_NOTICE "KLGDFF: Altered combinable effect, total active effects %lu\n", active_effects);
-			break;
-		case FFPL_TO_STOP:
-			if (eff->state == FFPL_STARTED)
-				needs_update = true;
-		case FFPL_TO_UPLOAD:
-			eff->state = FFPL_UPLOADED;
-			printk(KERN_NOTICE "KLGDFF: Combinable effect to upload/stop, marking as uploaded\n");
-			break;
-		default:
-			if (eff->state != FFPL_STARTED)
-				break;
-			needs_update = true;
-			eff->state = FFPL_EMPTY;
-			printk(KERN_NOTICE "KLGDFF: Stopped combinable effect, total active effects %lu\n", active_effects);
-			break;
-		}
-	}
-
-	/* Combined effect needs recalculation */
-	if (needs_update) {
-		if (active_effects) {
-			printk(KERN_NOTICE "KLGDFF: Combined effect needs an update, total effects active: %lu\n", active_effects);
-			ffpl_recalc_combined(priv);
-			if (priv->combined_effect.state == FFPL_STARTED)
-				priv->combined_effect.change = FFPL_TO_UPDATE;
-			else
-				priv->combined_effect.change = FFPL_TO_START;
-
-			return 0;
-		}
-		/* No combinable effects are active, remove the effect from device */
-		if (priv->combined_effect.state != FFPL_EMPTY) {
-			printk(KERN_NOTICE "KLGDFF: No combinable effects are active, erase the combined effect from device\n");
-			priv->combined_effect.change = FFPL_TO_ERASE;
-		}
-	}
-
-	return 0;
 }
 
 static int ffpl_erase_effect(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff)
@@ -445,6 +370,96 @@ static void ffpl_deinit(struct klgd_plugin *self)
 	printk(KERN_DEBUG "KLGDFF: Deinit complete\n");
 }
 
+static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, struct klgd_command_stream *s)
+{
+	size_t idx;
+	bool needs_update = false;
+	size_t active_effects = 0;
+
+	for (idx = 0; idx < priv->effect_count; idx++) {
+		int ret;
+		struct ffpl_effect *eff = &priv->effects[idx];
+
+		if (eff->replace) {
+			/* Uncombinable effect is about to be replaced by a combinable one */
+			if (ffpl_is_combinable(&eff->latest)) {
+				printk(KERN_NOTICE "KLGDFF: Replacing uncombinable with combinable\n");
+				ret = ffpl_erase_effect(priv, s, eff);
+				if (ret)
+					return ret;
+				eff->replace = false;
+			} else {
+			/* Combinable effect is being replaced by an uncombinable one */
+				printk(KERN_NOTICE "KLGDFF: Replacing combinable with uncombinable\n");
+				if (eff->state == FFPL_STARTED)
+					needs_update = true;
+				eff->state = FFPL_EMPTY;
+				eff->replace = false;
+				continue;
+			}
+		} else {
+			if (!ffpl_is_combinable(&eff->latest))
+				continue;
+		}		
+
+		switch (eff->change) {
+		case FFPL_DONT_TOUCH:
+			if (eff->state == FFPL_STARTED)
+				active_effects++;
+			printk(KERN_NOTICE "KLGDFF: Unchanged combinable effect, total active effects %lu\n", active_effects);
+			break;
+		case FFPL_TO_START:
+			eff->state = FFPL_STARTED;
+		case FFPL_TO_UPDATE:
+			eff->active = eff->latest;
+			active_effects++;
+			needs_update = true;
+			printk(KERN_NOTICE "KLGDFF: Altered combinable effect, total active effects %lu\n", active_effects);
+			break;
+		case FFPL_TO_STOP:
+			if (eff->state == FFPL_STARTED)
+				needs_update = true;
+		case FFPL_TO_UPLOAD:
+			eff->active = eff->latest;
+			eff->state = FFPL_UPLOADED;
+			printk(KERN_NOTICE "KLGDFF: Combinable effect to upload/stop, marking as uploaded\n");
+			break;
+		case FFPL_TO_ERASE:
+			if (eff->state == FFPL_STARTED)
+				needs_update = true;
+			eff->state = FFPL_EMPTY;
+			printk(KERN_NOTICE "KLGDFF: Stopped combinable effect, total active effects %lu\n", active_effects);
+			break;
+		default:
+			printk(KERN_WARNING "KLGDFF: Unknown effect change!\n");
+			break;
+		}
+
+		eff->change = FFPL_DONT_TOUCH;
+	}
+
+	/* Combined effect needs recalculation */
+	if (needs_update) {
+		if (active_effects) {
+			printk(KERN_NOTICE "KLGDFF: Combined effect needs an update, total effects active: %lu\n", active_effects);
+			ffpl_recalc_combined(priv);
+			if (priv->combined_effect.state == FFPL_STARTED)
+				priv->combined_effect.change = FFPL_TO_UPDATE;
+			else
+				priv->combined_effect.change = FFPL_TO_START;
+
+			return 0;
+		}
+		/* No combinable effects are active, remove the effect from device */
+		if (priv->combined_effect.state != FFPL_EMPTY) {
+			printk(KERN_NOTICE "KLGDFF: No combinable effects are active, erase the combined effect from device\n");
+			priv->combined_effect.change = FFPL_TO_ERASE;
+		}
+	}
+
+	return 0;
+}
+
 static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, const unsigned long now)
 {
 	struct klgd_plugin_private *priv = self->private;
@@ -460,20 +475,21 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 	if (ret)
 		printk(KERN_WARNING "KLGDFF: Cannot process combinable effects, ret %d\n", ret);
 
+	/* Handle combined effect here */
+	ret = ffpl_handle_state_change(priv, s, &priv->combined_effect);
+	if (ret)
+		printk(KERN_WARNING "KLGDFF: Cannot get command stream for combined effect\n");
+
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		struct ffpl_effect *eff = &priv->effects[idx];
 
 		printk(KERN_NOTICE "KLGDFF: Processing effect %lu\n", idx);
-		ret = ffpl_handle_state_change(priv, s, eff, true);
+		ret = ffpl_handle_state_change(priv, s, eff);
 		/* TODO: Do something useful with the return code */
 		if (ret)
 			printk(KERN_WARNING "KLGDFF: Cannot get command stream effect %lu\n", idx);
 	}
 
-	/* Handle combined effect here */
-	ret = ffpl_handle_state_change(priv, s, &priv->combined_effect, false);
-	if (ret)
-		printk(KERN_WARNING "KLGDFF: Cannot get command stream for combined effect\n");
 
 	return s;
 }
@@ -496,8 +512,7 @@ static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long n
 	return events ? true : false;
 }
 
-static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff,
-				    const bool ignore_combined)
+static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff)
 {
 	int ret;
 
@@ -540,12 +555,9 @@ static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klg
 				ret = ffpl_erase_effect(priv, s, eff);
 				if (ret)
 					break;
-			case FFPL_EMPTY: /* State cannot actually be FFPL_EMPTY becuase only uploaded or started effects have to be replaced like this */
-				/* Combinable effects are taken care of elsewhere and should not be uploaded individually */
-				if (!ffpl_is_combinable(&eff->latest))
-					ret = ffpl_upload_effect(priv, s, eff);
-				else
-					ret = 0;
+			case FFPL_EMPTY: /* State cannot actually be FFPL_EMPTY becuase only uploaded or started effects have to be replaced like this.
+					  * Only exception is when combinable effect is replaced */
+				ret = ffpl_upload_effect(priv, s, eff);
 				break;
 			default:
 				printk(KERN_WARNING "KLGDFF: Unhandled effect state\n");
@@ -569,11 +581,6 @@ static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klg
 				if (ret)
 					break;
 			case FFPL_EMPTY: /* State cannot actually be FFPL_EMPTY - same as above applies */
-				/* Combinable effects are taken care of elsewhere and should not be uploaded and started individually */
-				if (ffpl_is_combinable(&eff->latest)) {
-					ret = 0;
-					break;
-				}
 				ret = ffpl_upload_effect(priv, s, eff);
 				if (ret)
 					break;
@@ -600,13 +607,6 @@ static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klg
 		eff->replace = false;
 		eff->change = FFPL_DONT_TOUCH;
 		return ret;
-	}
-
-	/* Combinable effects have already been handled, do not try to handle then again individually */
-	if (ffpl_is_combinable(&eff->latest) && ignore_combined) {
-		printk(KERN_NOTICE "KLGDFF: Effect is combinable\n");
-		ret = 0;
-		goto out;
 	}
 
 	switch (eff->change) {
@@ -686,7 +686,6 @@ static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klg
 		pr_debug("KLGDFF: Unhandled effect state change\n");
 	}
 
-out:
 	eff->change = FFPL_DONT_TOUCH;
 
 	return ret;
