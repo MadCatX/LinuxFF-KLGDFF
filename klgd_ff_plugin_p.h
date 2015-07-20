@@ -20,6 +20,7 @@ enum ffpl_state {
 /* What to do at the next timing trip point */
 enum ffpl_trigger {
 	FFPL_TRIG_NONE,	  /* No timing event scheduled for and effect */
+	FFPL_TRIG_NOW,	  /* State change has been set elsewhere and is to be processed immediately */
 	FFPL_TRIG_START,  /* Effect is to be started */
 	FFPL_TRIG_STOP	  /* Effect is to be stopped */
 };

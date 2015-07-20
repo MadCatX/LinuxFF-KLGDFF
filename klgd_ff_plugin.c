@@ -289,6 +289,7 @@ static int ffpl_erase_rq(struct input_dev *dev, int effect_id)
 
 	klgd_lock_plugins(self->plugins_lock);
 	eff->change = FFPL_TO_ERASE;
+	eff->trigger = FFPL_TRIG_NOW;
 	klgd_unlock_plugins_sched(self->plugins_lock);
 
 	return 0;
@@ -344,6 +345,7 @@ static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struc
 		if (ffpl_needs_replacing(&eff->active, &eff->latest)) {
 			eff->replace = true;
 			eff->change = FFPL_TO_UPLOAD;
+			eff->trigger = FFPL_TRIG_NOW;
 		} else {
 			eff->replace = false;
 			eff->change = FFPL_TO_UPDATE;
@@ -525,6 +527,7 @@ static void ffpl_advance_trigger(struct ffpl_effect *eff)
 			eff->trigger = FFPL_TRIG_NONE;
 		break;
 	case FFPL_TRIG_STOP:
+	case FFPL_TRIG_NOW:
 		eff->trigger = FFPL_TRIG_NONE;
 		break;
 	default:
@@ -545,6 +548,9 @@ static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long n
 		switch (eff->trigger) {
 		default:
 			continue;
+		case FFPL_TRIG_NOW:
+			current_t = now;
+			break;
 		case FFPL_TRIG_START:
 			current_t = eff->start_at;
 			eff->change = FFPL_TO_START;
