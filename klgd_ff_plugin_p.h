@@ -7,7 +7,7 @@ enum ffpl_st_change {
 	FFPL_TO_START,	  /* Effect shall be started */
 	FFPL_TO_STOP,	  /* Effect shall be stopped */
 	FFPL_TO_ERASE,	  /* Effect shall be removed from device */
-	FFPL_TO_UPDATE	  /* Effect paramaters shall be updated */
+	FFPL_TO_UPDATE,	  /* Effect paramaters shall be updated */
 };
 
 /* Possible states of an effect */
@@ -17,14 +17,26 @@ enum ffpl_state {
 	FFPL_STARTED,	  /* Effect in the slot is started on device */
 };
 
+/* What to do at the next timing trip point */
+enum ffpl_trigger {
+	FFPL_TRIG_NONE,	  /* No timing event scheduled for and effect */
+	FFPL_TRIG_START,  /* Effect is to be started */
+	FFPL_TRIG_STOP	  /* Effect is to be stopped */
+};
+
 struct ffpl_effect {
 	struct ff_effect active;	/* Last effect submitted to device */
 	struct ff_effect latest;	/* Last effect submitted to us by userspace */
-	int repeat;			/* How many times to repeat an effect - set in playback_rq */
 	enum ffpl_st_change change;	/* State to which the effect shall be put */
 	enum ffpl_state state;		/* State of the active effect */
 	bool replace;			/* Active effect has to be replaced => active effect shall be erased and latest uploaded */
 	bool uploaded_to_device;	/* Effect was physically uploaded to device */
+
+	enum ffpl_trigger trigger;	/* What to do with the effect at its nearest timing trip point */
+	int repeat;			/* How many times to repeat an effect - set in playback_rq */
+	unsigned long start_at;		/* Time when to start the effect - in jiffies */
+	unsigned long stop_at;		/* Time when to stop the effect - in jiffies */
+	bool finite;			/* Effect has a finite duration */
 };
 
 struct klgd_plugin_private {

@@ -1,6 +1,7 @@
 #include "klgd_ff_plugin_p.h"
 #include <linux/slab.h>
 #include <linux/fixp-arith.h>
+#include <linux/jiffies.h>
 
 #define DIR_TO_DEGREES(dir) (360 - ((((dir > 0xc000) ? (u32)dir + 0x4000 - 0xffff : (u32)dir + 0x4000) * 360) / 0xffff))
 
@@ -299,14 +300,26 @@ static int ffpl_playback_rq(struct input_dev *dev, int effect_id, int value)
 	struct klgd_plugin *self = dev->ff->private;
 	struct klgd_plugin_private *priv = self->private;
 	struct ffpl_effect *eff = &priv->effects[effect_id];
+	struct ff_effect *uff = &eff->latest;
+	const unsigned long now = jiffies;
 
 	klgd_lock_plugins(self->plugins_lock);
 
 	if (value) {
-		eff->change = FFPL_TO_START;
 		eff->repeat = value;
-	} else
-		eff->change = FFPL_TO_STOP;
+		eff->start_at = now + msecs_to_jiffies(uff->replay.delay);
+		eff->trigger = FFPL_TRIG_START;
+		printk(KERN_NOTICE "KLGDFF: Delayed effect will be started at %lu, now: %lu\n", eff->start_at, now);
+
+		if (uff->replay.length) {
+			eff->finite = true;
+			eff->stop_at = eff->start_at + msecs_to_jiffies(uff->replay.length);
+			printk(KERN_NOTICE "KLGDFF: Finite effect will be stopped at %lu, now: %lu\n", eff->stop_at, now);
+		} else
+			eff->finite = false;
+	} else {
+		eff->trigger = FFPL_TRIG_STOP;
+	}
 
 	klgd_unlock_plugins_sched(self->plugins_lock);
 
@@ -502,19 +515,51 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 	return s;
 }
 
+static void ffpl_advance_trigger(struct ffpl_effect *eff)
+{
+	switch (eff->trigger) {
+	case FFPL_TRIG_START:
+		if (eff->finite)
+			eff->trigger = FFPL_TRIG_STOP;
+		else
+			eff->trigger = FFPL_TRIG_NONE;
+		break;
+	case FFPL_TRIG_STOP:
+		eff->trigger = FFPL_TRIG_NONE;
+		break;
+	default:
+		break;
+	}
+}
+
 static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long now, unsigned long *t)
 {
 	struct klgd_plugin_private *priv = self->private;
-	size_t idx, events = 0;
+	size_t idx;
+	unsigned long events = 0;
 
 	for (idx = 0; idx < priv->effect_count; idx++) {
+		unsigned long current_t;
 		struct ffpl_effect *eff = &priv->effects[idx];
 
-		/* Tell KLGD to attend to us as soon as possible if an effect has to change state */
-		if (eff->change == FFPL_DONT_TOUCH)
+		switch (eff->trigger) {
+		default:
 			continue;
-		*t = now;
-		events++;
+		case FFPL_TRIG_START:
+			current_t = eff->start_at;
+			eff->change = FFPL_TO_START;
+			break;
+		case FFPL_TRIG_STOP:
+			current_t = eff->stop_at;
+			eff->change = FFPL_TO_STOP;
+			break;
+		}
+
+		ffpl_advance_trigger(eff);
+		if (!events++)
+			*t = current_t;
+		else if (time_before(current_t, *t))
+			*t = current_t;
 	}
 
 	return events ? true : false;
