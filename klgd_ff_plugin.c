@@ -357,6 +357,7 @@ static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struc
 		} else {
 			eff->replace = false;
 			eff->change = FFPL_TO_UPDATE;
+			eff->trigger = FFPL_TRIG_NOW;
 		}
 	} else
 		eff->change = FFPL_TO_UPLOAD;
