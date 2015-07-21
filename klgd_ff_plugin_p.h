@@ -7,7 +7,7 @@ enum ffpl_st_change {
 	FFPL_TO_START,	  /* Effect shall be started */
 	FFPL_TO_STOP,	  /* Effect shall be stopped */
 	FFPL_TO_ERASE,	  /* Effect shall be removed from device */
-	FFPL_TO_UPDATE,	  /* Effect paramaters shall be updated */
+	FFPL_TO_UPDATE	  /* Effect paramaters shall be updated */
 };
 
 /* Possible states of an effect */
@@ -22,7 +22,8 @@ enum ffpl_trigger {
 	FFPL_TRIG_NONE,	  /* No timing event scheduled for and effect */
 	FFPL_TRIG_NOW,	  /* State change has been set elsewhere and is to be processed immediately */
 	FFPL_TRIG_START,  /* Effect is to be started */
-	FFPL_TRIG_STOP	  /* Effect is to be stopped */
+	FFPL_TRIG_STOP,	  /* Effect is to be stopped */
+	FFPL_TRIG_RECALC  /* Effect needs to be recalculated */
 };
 
 struct ffpl_effect {
@@ -37,7 +38,8 @@ struct ffpl_effect {
 	int repeat;			/* How many times to repeat an effect - set in playback_rq */
 	unsigned long start_at;		/* Time when to start the effect - in jiffies */
 	unsigned long stop_at;		/* Time when to stop the effect - in jiffies */
-	bool finite;			/* Effect has a finite duration */
+	unsigned long updated_at;	/* Time when the effect was recalculated last time - in jiffies */
+	bool recalculate;		/* Effect shall be recalculated in the respective processing loop */
 };
 
 struct klgd_plugin_private {
