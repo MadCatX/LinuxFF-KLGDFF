@@ -17,6 +17,56 @@ static bool ffpl_is_combinable(const struct ff_effect *eff)
 	return eff->type == FF_CONSTANT;
 }
 
+static const struct ff_envelope * ffpl_get_envelope(const struct ff_effect *ueff)
+{
+	switch (ueff->type) {
+	case FF_CONSTANT:
+		return &ueff->u.constant.envelope;
+	case FF_PERIODIC:
+		return &ueff->u.periodic.envelope;
+	case FF_RAMP:
+		return &ueff->u.ramp.envelope;
+	default:
+		return NULL;
+	}
+}
+
+static bool ffpl_is_effect_valid(const struct ff_effect *ueff)
+{
+	const u16 length = ueff->replay.length;
+
+	/* Periodic effects must have a non-zero period */
+	if (ueff->type == FF_PERIODIC) {
+		if (!ueff->u.periodic.period)
+			return false;
+	}
+	/* Ramp effects cannot be infinite */
+	if (ueff->type == FF_RAMP && !length)
+		return false;
+
+	if (ffpl_is_combinable(ueff)) {
+		int fade_from;
+		const struct ff_envelope *env = ffpl_get_envelope(ueff);
+
+		if (!env)
+			BUG_ON("NULL envelope in effect validity check!");
+
+		/* Infinite effects cannot fade */
+		if (!length && env->fade_length > 0)
+			return false;
+
+		/* Fade length cannot be greater than effect duration */
+		fade_from = (int)length - (int)env->fade_length;
+		if (fade_from < 0)
+			return false;
+		/* Envelope cannot start fading before it finishes attacking */
+		if (fade_from < env->attack_length && fade_from > 0)
+			return false;
+	}
+
+	return true;
+}
+
 static u16 ffpl_atan_int_octet(const u16 x, const u16 y)
 {
     u32 result;
@@ -342,6 +392,9 @@ static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struc
 	struct klgd_plugin_private *priv = self->private;
 	struct ffpl_effect *eff = &priv->effects[effect->id];
 
+	if (!ffpl_is_effect_valid(effect))
+		return -EINVAL;
+
 	klgd_lock_plugins(self->plugins_lock);
 	spin_lock_irq(&dev->event_lock);
 
@@ -530,18 +583,6 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 	return s;
 }
 
-static const struct ff_envelope * ffpl_get_envelope(const struct ff_effect *ueff)
-{
-	switch (ueff->type) {
-	case FF_CONSTANT:
-		return &ueff->u.constant.envelope;
-	case FF_PERIODIC:
-		return &ueff->u.periodic.envelope;
-	default:
-		return NULL;
-	}
-}
-	
 static unsigned long ffpl_get_recalculation_time(const struct ffpl_effect *eff)
 {
 	unsigned long t_trip;
