@@ -4,6 +4,7 @@
 #include <linux/jiffies.h>
 
 #define DIR_TO_DEGREES(dir) (360 - ((((dir > 0xc000) ? (u32)dir + 0x4000 - 0xffff : (u32)dir + 0x4000) * 360) / 0xffff))
+#define FRAC_16 8
 #define RECALC_DELTA_T_MSEC 20
 
 static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff,
@@ -154,8 +155,8 @@ bool ffpl_constant_force_to_x_y(const struct ff_effect *eff, s32 *x, s32 *y)
 
 	degrees = DIR_TO_DEGREES(eff->direction);
 	printk(KERN_NOTICE "KLGDFF: DIR_TO_DEGREES > Dir: %u, Deg: %u\n", eff->direction, degrees);
-	*x += (eff->u.constant.level * fixp_cos(degrees)) >> FRAC_N;
-	*y += (eff->u.constant.level * fixp_sin(degrees)) >> FRAC_N;
+	*x += (eff->u.constant.level * fixp_cos16(degrees)) >> FRAC_16;
+	*y += (eff->u.constant.level * fixp_sin16(degrees)) >> FRAC_16;
 
 	return true;
 }
