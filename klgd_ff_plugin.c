@@ -4,7 +4,7 @@
 #include <linux/jiffies.h>
 
 #define DIR_TO_DEGREES(dir) (360 - ((((dir > 0xc000) ? (u32)dir + 0x4000 - 0xffff : (u32)dir + 0x4000) * 360) / 0xffff))
-#define FRAC_16 8
+#define FRAC_16 15
 #define RECALC_DELTA_T_MSEC 20
 
 static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff,
