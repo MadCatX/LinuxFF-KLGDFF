@@ -329,6 +329,21 @@ static int ffpl_upload_effect(struct klgd_plugin_private *priv, struct klgd_comm
 	return 0;
 }
 
+static void ffpl_calculate_trip_times(struct ffpl_effect *eff, const unsigned long now)
+{
+	const struct ff_effect *ueff = &eff->latest;
+
+	eff->start_at = now + msecs_to_jiffies(ueff->replay.delay);
+
+	if (ueff->replay.delay)
+		printk(KERN_NOTICE "KLGDFF: Delayed effect will be started at %lu, now: %lu\n", eff->start_at, now);
+
+	if (ueff->replay.length) {
+		eff->stop_at = eff->start_at + msecs_to_jiffies(ueff->replay.length);
+		printk(KERN_NOTICE "KLGDFF: Finite effect will be stopped at %lu, now: %lu\n", eff->stop_at, now);
+	}
+}
+
 /* Destroy request - input device is being destroyed */
 static void ffpl_destroy_rq(struct ff_device *ff)
 {
@@ -360,23 +375,14 @@ static int ffpl_playback_rq(struct input_dev *dev, int effect_id, int value)
 	struct klgd_plugin *self = dev->ff->private;
 	struct klgd_plugin_private *priv = self->private;
 	struct ffpl_effect *eff = &priv->effects[effect_id];
-	struct ff_effect *ueff = &eff->latest;
 	const unsigned long now = jiffies;
 
 	klgd_lock_plugins(self->plugins_lock);
 
 	if (value) {
 		eff->repeat = value;
-		eff->start_at = now + msecs_to_jiffies(ueff->replay.delay);
+		ffpl_calculate_trip_times(eff, now);
 		eff->trigger = FFPL_TRIG_START;
-
-		if (ueff->replay.delay)
-			printk(KERN_NOTICE "KLGDFF: Delayed effect will be started at %lu, now: %lu\n", eff->start_at, now);
-
-		if (ueff->replay.length) {
-			eff->stop_at = eff->start_at + msecs_to_jiffies(ueff->replay.length);
-			printk(KERN_NOTICE "KLGDFF: Finite effect will be stopped at %lu, now: %lu\n", eff->stop_at, now);
-		}
 	} else {
 		eff->trigger = FFPL_TRIG_STOP;
 	}
@@ -656,6 +662,9 @@ static void ffpl_advance_trigger(struct ffpl_effect *eff, const unsigned long no
 		else
 			eff->trigger = FFPL_TRIG_NONE;
 		break;
+	case FFPL_TRIG_RESTART:
+		eff->trigger = FFPL_TRIG_STOP;
+		break;
 	case FFPL_TRIG_RECALC:
 		if (ffpl_needs_recalculation(&eff->active, now - eff->start_at, eff->stop_at, now))
 			break;
@@ -664,6 +673,10 @@ static void ffpl_advance_trigger(struct ffpl_effect *eff, const unsigned long no
 			break;
 		}
 	case FFPL_TRIG_STOP:
+		if (eff->repeat > 0) {
+			eff->trigger = FFPL_TRIG_RESTART;
+			break;
+		}
 	case FFPL_TRIG_NOW:
 		eff->trigger = FFPL_TRIG_NONE;
 		break;
@@ -686,6 +699,8 @@ static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long n
 		case FFPL_TRIG_NOW:
 			current_t = now;
 			break;
+		case FFPL_TRIG_RESTART:
+			ffpl_calculate_trip_times(eff, now);
 		case FFPL_TRIG_START:
 			current_t = eff->start_at;
 			eff->change = FFPL_TO_START;
@@ -693,6 +708,7 @@ static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long n
 		case FFPL_TRIG_STOP:
 			current_t = eff->stop_at;
 			eff->change = FFPL_TO_STOP;
+			eff->repeat--;
 			break;
 		case FFPL_TRIG_RECALC:
 			current_t = ffpl_get_recalculation_time(eff);
