@@ -27,6 +27,8 @@ enum ffpl_trigger {
 	FFPL_TRIG_RECALC  /* Effect needs to be recalculated */
 };
 
+
+
 struct ffpl_effect {
 	struct ff_effect active;	/* Last effect submitted to device */
 	struct ff_effect latest;	/* Last effect submitted to us by userspace */
@@ -40,6 +42,7 @@ struct ffpl_effect {
 	unsigned long start_at;		/* Time when to start the effect - in jiffies */
 	unsigned long stop_at;		/* Time when to stop the effect - in jiffies */
 	unsigned long updated_at;	/* Time when the effect was recalculated last time - in jiffies */
+	unsigned long playback_time;	/* Used internally by effect processor to calculate periods */
 	bool recalculate;		/* Effect shall be recalculated in the respective processing loop */
 };
 

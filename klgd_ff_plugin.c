@@ -12,10 +12,26 @@ static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klg
 static bool ffpl_has_gain(const struct ff_effect *eff);
 static bool ffpl_needs_replacing(const struct ff_effect *ac_eff, const struct ff_effect *la_eff);
 
+void ffpl_lvl_dir_to_x_y(const s32 level, const u16 direction, s32 *x, s32 *y)
+{
+	const int degrees = DIR_TO_DEGREES(direction);
+
+	printk(KERN_NOTICE "KLGDFF: DIR_TO_DEGREES > Dir: %u, Deg: %u\n", direction, degrees);
+	*x = (level * fixp_cos16(degrees)) >> FRAC_16;
+	*y = (level * fixp_sin16(degrees)) >> FRAC_16;
+}
+
 static bool ffpl_is_combinable(const struct ff_effect *eff)
 {
 	/* TODO: Proper decision of what is a combinable effect */
-	return eff->type == FF_CONSTANT;
+	switch (eff->type) {
+	case FF_CONSTANT:
+	case FF_PERIODIC:
+	case FF_RAMP:
+		return true;
+	default:
+		return false;
+	}
 }
 
 static const struct ff_envelope * ffpl_get_envelope(const struct ff_effect *ueff)
@@ -146,22 +162,102 @@ static void ffpl_x_y_to_lvl_dir(const s32 x, const s32 y, s16 *level, u16 *direc
 	*level = (pwr > 0x7fff) ? 0x7fff : pwr;
 }
 
-bool ffpl_constant_force_to_x_y(const struct ff_effect *eff, s32 *x, s32 *y)
+static s32 ffpl_apply_envelope(const struct ff_effect *ueff, const unsigned long now)
 {
-	int degrees;
+	const struct ff_envelope *env = ffpl_get_envelope(ueff);
+	s32 level;
 
-	if (eff->type != FF_CONSTANT)
-		return false;
+	if (!env)
+		return 0;
 
-	degrees = DIR_TO_DEGREES(eff->direction);
-	printk(KERN_NOTICE "KLGDFF: DIR_TO_DEGREES > Dir: %u, Deg: %u\n", eff->direction, degrees);
-	*x += (eff->u.constant.level * fixp_cos16(degrees)) >> FRAC_16;
-	*y += (eff->u.constant.level * fixp_sin16(degrees)) >> FRAC_16;
+	switch (ueff->type) {
+	case FF_CONSTANT:
+		level = ueff->u.constant.level;
+		break;
+	case FF_PERIODIC:
+		level = ueff->u.periodic.magnitude;
+		break;
+	case FF_RAMP:
+		printk(KERN_NOTICE "KLGDFF: FF_RAMP envelope is not handled yet\n");
+		return 0;
+	}
 
-	return true;
+	/* TODO: Apply envelopes to the level */
+	return level;
 }
 
-static void ffpl_recalc_combined(struct klgd_plugin_private *priv)
+
+static void ffpl_constant_to_x_y(const struct ff_effect *ueff, s32 *x, s32 *y, const unsigned long now)
+{
+	const s32 level = ffpl_apply_envelope(ueff, now);
+	s32 _x;
+	s32 _y;
+
+	ffpl_lvl_dir_to_x_y(level, ueff->direction, &_x, &_y);
+	*x += _x;
+	*y += _y;
+}
+
+static void ffpl_periodic_to_x_y(struct ffpl_effect *eff, s32 *x, s32 *y, const unsigned long now)
+{
+	const struct ff_effect *ueff = &eff->active;
+	const u16 period = ueff->u.periodic.period;
+	const s16 offset = ueff->u.periodic.offset;
+	const s32 level = ffpl_apply_envelope(ueff, now);
+	s32 new;
+	u16 t;
+	s32 _x;
+	s32 _y;
+
+	eff->playback_time += jiffies_to_msecs(now - eff->updated_at) % period;
+	t = (eff->playback_time + ueff->u.periodic.phase) % period;
+
+	switch (ueff->u.periodic.waveform) {
+	case FF_SINE:
+	{
+		u16 degrees = (360 * t) / period;
+		new = ((level * fixp_sin16(degrees)) >> FRAC_16) + offset;
+		break;
+	}
+	case FF_SQUARE:
+	{
+		u16 degrees = (360 * t) / period;
+		new = level * (degrees < 180 ? 1 : -1) + offset;
+		break;
+	}
+	case FF_SAW_UP:
+		new = 2 * level * t / period - level + offset;
+		break;
+	case FF_SAW_DOWN:
+		new = level - 2 * level * t / period + offset;
+		break;
+	case FF_TRIANGLE:
+	{
+		new = (2 * abs(level - (2 * level * t) / period));
+		new = new - abs(level) + offset;
+		break;
+	}
+	case FF_CUSTOM:
+		pr_err("Custom waveform is not handled by this driver\n");
+		break;
+	default:
+		pr_err("Invalid waveform\n");
+		break;
+	}
+
+	/* Ensure that the offset did not make the value exceed s16 range */
+	new = clamp(new, -0x7fff, 0x7fff);
+	ffpl_lvl_dir_to_x_y(level, ueff->direction, &_x, &_y);
+	*x += _x;
+	*y += _y;
+}
+
+static void ffpl_ramp_to_x_y(struct ffpl_effect *eff, s32 *x, s32 *y, const unsigned long now)
+{
+	printk(KERN_NOTICE "FF_RAMP is not implemented yet\n");
+}
+
+static void ffpl_recalc_combined(struct klgd_plugin_private *priv, const unsigned long now)
 {
 	size_t idx;
 	struct ff_effect *cb_latest = &priv->combined_effect.latest;
@@ -170,15 +266,25 @@ static void ffpl_recalc_combined(struct klgd_plugin_private *priv)
 
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		struct ffpl_effect *eff = &priv->effects[idx];
+		struct ff_effect *ueff = &eff->active;
 
 		if (eff->state != FFPL_STARTED)
 			continue;
 
-		if (eff->recalculate) {
-			printk(KERN_NOTICE "KLGDFF: Effect force will be recalculated here, now there is just a dummy procedure");
-			eff->recalculate = false;
+		switch (ueff->type) {
+		case FF_CONSTANT:
+			ffpl_constant_to_x_y(&eff->active, &x, &y, now);
+			break;
+		case FF_PERIODIC:
+			ffpl_periodic_to_x_y(eff, &x, &y, now);
+			break;
+		case FF_RAMP:
+			ffpl_ramp_to_x_y(eff, &x, &y, now);
+			break;
+		default:
+			printk(KERN_ERR "KLGDFF: Combinable effect handler tried to process an unccombinable effect! This should not happen!\n");
+			break;
 		}
-		ffpl_constant_force_to_x_y(&eff->active, &x, &y);
 	}
 
 	ffpl_x_y_to_lvl_dir(x, y, &cb_latest->u.constant.level, &cb_latest->direction);
@@ -500,6 +606,7 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 			if (eff->state == FFPL_STARTED) {
 				active_effects++;
 				needs_update |= eff->recalculate;
+				eff->recalculate = false;
 			}
 			printk(KERN_NOTICE "KLGDFF: Unchanged combinable effect, total active effects %lu\n", active_effects);
 			break;
@@ -538,7 +645,7 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 	if (needs_update) {
 		if (active_effects) {
 			printk(KERN_NOTICE "KLGDFF: Combined effect needs an update, total effects active: %lu\n", active_effects);
-			ffpl_recalc_combined(priv);
+			ffpl_recalc_combined(priv, now);
 			if (priv->combined_effect.state == FFPL_STARTED)
 				priv->combined_effect.change = FFPL_TO_UPDATE;
 			else
@@ -703,6 +810,7 @@ static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long n
 			ffpl_calculate_trip_times(eff, now);
 		case FFPL_TRIG_START:
 			current_t = eff->start_at;
+			eff->playback_time = 0;
 			eff->change = FFPL_TO_START;
 			break;
 		case FFPL_TRIG_STOP:
