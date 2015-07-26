@@ -28,8 +28,6 @@ enum ffpl_trigger {
 	FFPL_TRIG_UPDATE    /* Effect needs to be updated */
 };
 
-
-
 struct ffpl_effect {
 	struct ff_effect active;	/* Last effect submitted to device */
 	struct ff_effect latest;	/* Last effect submitted to us by userspace */
