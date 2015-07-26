@@ -657,6 +657,10 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 			eff->state = FFPL_STARTED;
 		case FFPL_TO_UPDATE:
 			eff->active = eff->latest;
+			if (eff->state != FFPL_STARTED) {
+				printk(KERN_NOTICE "KLGDFF: Updating a stopped combinable effect\n");
+				break;
+			}
 			active_effects++;
 			needs_update = true;
 			printk(KERN_NOTICE "KLGDFF: %s combinable effect, total active effects %lu\n", eff->change == FFPL_TO_START ? "Started" : "Altered", active_effects);
@@ -853,7 +857,7 @@ static void ffpl_advance_trigger(struct ffpl_effect *eff, const unsigned long no
 		eff->trigger = FFPL_TRIG_NONE;
 		break;
 	case FFPL_TRIG_UPDATE:
-		if (ffpl_needs_recalculation(&eff->active, eff->start_at, eff->stop_at, now))
+		if (ffpl_needs_recalculation(&eff->active, eff->start_at, eff->stop_at, now) && eff->state == FFPL_STARTED)
 			eff->trigger = FFPL_TRIG_RECALC;
 		else
 			eff->trigger = FFPL_TRIG_NONE;
