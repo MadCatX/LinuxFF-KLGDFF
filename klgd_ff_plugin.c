@@ -65,8 +65,10 @@ static bool ffpl_is_effect_valid(const struct ff_effect *ueff)
 		int fade_from;
 		const struct ff_envelope *env = ffpl_get_envelope(ueff);
 
-		if (!env)
-			BUG_ON("NULL envelope in effect validity check!");
+		if (!env) {
+			printk(KERN_ERR "KLGDFF: NULL envelope in validity check. This cannot happen!\n");
+			return false;
+		}
 
 		/* Infinite effects cannot fade */
 		if (!length && env->fade_length > 0)
@@ -180,6 +182,10 @@ static s32 ffpl_apply_envelope(const struct ff_effect *ueff, const unsigned long
 	case FF_RAMP:
 		printk(KERN_NOTICE "KLGDFF: FF_RAMP envelope is not handled yet\n");
 		return 0;
+	default:
+		printk(KERN_ERR "KLGDFF: Invalid effect passed to envelope calculation. This cannot happen!\n");
+		BUG();
+		return 0;
 	}
 
 	/* TODO: Apply envelopes to the level */
@@ -204,13 +210,16 @@ static void ffpl_periodic_to_x_y(struct ffpl_effect *eff, s32 *x, s32 *y, const 
 	const u16 period = ueff->u.periodic.period;
 	const s16 offset = ueff->u.periodic.offset;
 	const s32 level = ffpl_apply_envelope(ueff, now);
-	s32 new;
+	s32 new = 0;
 	u16 t;
 	s32 _x;
 	s32 _y;
 
-	eff->playback_time += jiffies_to_msecs(now - eff->updated_at) % period;
+	eff->playback_time += jiffies_to_msecs(now - eff->updated_at);
+	eff->playback_time %= period;
 	t = (eff->playback_time + ueff->u.periodic.phase) % period;
+
+	printk(KERN_NOTICE "KLGDFF: PT: %u, t: %u, dt: %lu\n", eff->playback_time, t, now - eff->updated_at);
 
 	switch (ueff->u.periodic.waveform) {
 	case FF_SINE:
@@ -247,7 +256,8 @@ static void ffpl_periodic_to_x_y(struct ffpl_effect *eff, s32 *x, s32 *y, const 
 
 	/* Ensure that the offset did not make the value exceed s16 range */
 	new = clamp(new, -0x7fff, 0x7fff);
-	ffpl_lvl_dir_to_x_y(level, ueff->direction, &_x, &_y);
+	printk(KERN_NOTICE "KLGDFF: Periodic %d\n", new);
+	ffpl_lvl_dir_to_x_y(new, ueff->direction, &_x, &_y);
 	*x += _x;
 	*y += _y;
 }
@@ -285,6 +295,8 @@ static void ffpl_recalc_combined(struct klgd_plugin_private *priv, const unsigne
 			printk(KERN_ERR "KLGDFF: Combinable effect handler tried to process an unccombinable effect! This should not happen!\n");
 			break;
 		}
+
+		eff->updated_at = now;
 	}
 
 	ffpl_x_y_to_lvl_dir(x, y, &cb_latest->u.constant.level, &cb_latest->direction);
@@ -440,6 +452,7 @@ static void ffpl_calculate_trip_times(struct ffpl_effect *eff, const unsigned lo
 	const struct ff_effect *ueff = &eff->latest;
 
 	eff->start_at = now + msecs_to_jiffies(ueff->replay.delay);
+	eff->updated_at = eff->start_at;
 
 	if (ueff->replay.delay)
 		printk(KERN_NOTICE "KLGDFF: Delayed effect will be started at %lu, now: %lu\n", eff->start_at, now);
@@ -467,6 +480,8 @@ static int ffpl_erase_rq(struct input_dev *dev, int effect_id)
 	struct klgd_plugin_private *priv = self->private;
 	struct ffpl_effect *eff = &priv->effects[effect_id];
 
+	printk(KERN_NOTICE "KLGDFF: RQ erase\n");
+
 	klgd_lock_plugins(self->plugins_lock);
 	eff->change = FFPL_TO_ERASE;
 	eff->trigger = FFPL_TRIG_NOW;
@@ -483,14 +498,17 @@ static int ffpl_playback_rq(struct input_dev *dev, int effect_id, int value)
 	struct ffpl_effect *eff = &priv->effects[effect_id];
 	const unsigned long now = jiffies;
 
+	printk(KERN_NOTICE "KLGDFF: RQ %s\n", value ? "play" : "stop");
+
 	klgd_lock_plugins(self->plugins_lock);
 
-	if (value) {
-		eff->repeat = value;
+	eff->repeat = value;
+	if (value > 0) {
 		ffpl_calculate_trip_times(eff, now);
 		eff->trigger = FFPL_TRIG_START;
 	} else {
-		eff->trigger = FFPL_TRIG_STOP;
+		eff->change = FFPL_TO_STOP;
+		eff->trigger = FFPL_TRIG_NOW;
 	}
 
 	klgd_unlock_plugins_sched(self->plugins_lock);
@@ -504,6 +522,8 @@ static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struc
 	struct klgd_plugin *self = dev->ff->private;
 	struct klgd_plugin_private *priv = self->private;
 	struct ffpl_effect *eff = &priv->effects[effect->id];
+
+	printk(KERN_NOTICE "KLGDFF: RQ upload\n");
 
 	if (!ffpl_is_effect_valid(effect))
 		return -EINVAL;
@@ -523,7 +543,7 @@ static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struc
 		} else {
 			eff->replace = false;
 			eff->change = FFPL_TO_UPDATE;
-			eff->trigger = FFPL_TRIG_NOW;
+			eff->trigger = FFPL_TRIG_UPDATE;
 		}
 	} else
 		eff->change = FFPL_TO_UPLOAD;
@@ -599,16 +619,19 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 		} else {
 			if (!ffpl_is_combinable(&eff->latest))
 				continue;
-		}		
+		}
 
 		switch (eff->change) {
 		case FFPL_DONT_TOUCH:
 			if (eff->state == FFPL_STARTED) {
 				active_effects++;
-				needs_update |= eff->recalculate;
-				eff->recalculate = false;
-			}
-			printk(KERN_NOTICE "KLGDFF: Unchanged combinable effect, total active effects %lu\n", active_effects);
+				if (eff->recalculate) {
+					needs_update = true;
+					eff->recalculate = false;
+					printk(KERN_NOTICE "KLGDFF: Recalculable combinable effect, total active effects %lu\n", active_effects);
+				}
+			} else
+				printk(KERN_NOTICE "KLGDFF: Unchanged combinable effect, total active effects %lu\n", active_effects);
 			break;
 		case FFPL_TO_START:
 			eff->state = FFPL_STARTED;
@@ -616,7 +639,7 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 			eff->active = eff->latest;
 			active_effects++;
 			needs_update = true;
-			printk(KERN_NOTICE "KLGDFF: Altered combinable effect, total active effects %lu\n", active_effects);
+			printk(KERN_NOTICE "KLGDFF: %s combinable effect, total active effects %lu\n", eff->change == FFPL_TO_START ? "Started" : "Altered", active_effects);
 			break;
 		case FFPL_TO_STOP:
 			if (eff->state == FFPL_STARTED)
@@ -638,7 +661,6 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 		}
 
 		eff->change = FFPL_DONT_TOUCH;
-		eff->updated_at = now;
 	}
 
 	/* Combined effect needs recalculation */
@@ -661,6 +683,157 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 	}
 
 	return 0;
+}
+
+static unsigned long ffpl_get_ticking_recalculation_time(const struct ffpl_effect *eff, const unsigned long now)
+{
+	const struct ff_effect *ueff = &eff->active;
+
+	switch (ueff->type) {
+	case FF_PERIODIC:
+		switch (ueff->u.periodic.waveform) {
+		case FF_SQUARE:
+			return now + msecs_to_jiffies(ueff->u.periodic.period / 2);
+		default:
+			return now + msecs_to_jiffies(RECALC_DELTA_T_MSEC);
+		}
+		break;
+	case FF_RAMP:
+		return now + msecs_to_jiffies(RECALC_DELTA_T_MSEC);
+	default:
+		printk(KERN_ERR "KLGDFF: Invalid type of effect passed to ticking ticking_recalculation. This cannot happen!\n");
+		BUG();
+		return 0;
+	}
+}
+
+static unsigned long ffpl_get_env_recalculation_time(const struct ffpl_effect *eff, const unsigned long now)
+{
+	const struct ff_envelope *env = ffpl_get_envelope(&eff->active);
+	unsigned long t;
+
+	/* Is the envelope attacking */
+	t = eff->start_at + msecs_to_jiffies(env->attack_length); /* Time of the end of the attack */
+	if (time_before(now, t)) {
+		printk(KERN_NOTICE "KLGDFF: Envelope attacking\n");
+		return now + msecs_to_jiffies(RECALC_DELTA_T_MSEC);
+	}
+
+	t = eff->stop_at - msecs_to_jiffies(env->fade_length); /* Time of the beginning of the fade */
+	if (time_before(now, t)) {
+		printk(KERN_NOTICE "KLGDFF: Envelope waiting to fade\n");
+		return t;	/* Schedule an update for the beginning of the fade */
+	}
+
+	printk(KERN_NOTICE "KLGDFF: Envelope is fading\n");
+	return now + msecs_to_jiffies(RECALC_DELTA_T_MSEC); /* Continue fading */
+}
+
+static unsigned long ffpl_get_recalculation_time(const struct ffpl_effect *eff, const unsigned long now)
+{
+	const struct ff_envelope *env = ffpl_get_envelope(&eff->active);
+	const bool ticks = eff->active.type == FF_PERIODIC || eff->active.type == FF_RAMP;
+	bool has_envelope = false;
+
+	if (env)
+		has_envelope = env->attack_length || env->fade_length;
+
+	if (ticks && has_envelope) {
+		const unsigned long t_tick = ffpl_get_ticking_recalculation_time(eff, now);
+		const unsigned long t_env = ffpl_get_env_recalculation_time(eff, now);
+
+		printk(KERN_NOTICE "KLGDFF: Effect has both envelope and ticks\n");
+		return time_before(t_tick, t_env) ? t_tick : t_env;
+	}
+	if (ticks)
+		return ffpl_get_ticking_recalculation_time(eff, now);
+	if (!has_envelope) {
+		printk(KERN_ERR "KLGDFF: Effect does not have to be recalculated but ffpl_get_recalculation_time() was called\n");
+		BUG();
+	}
+
+	return ffpl_get_env_recalculation_time(eff, now);
+}
+
+static bool ffpl_needs_recalculation(const struct ff_effect *ueff, const unsigned long stop_at, const unsigned long now)
+{
+	const struct ff_envelope *env = ffpl_get_envelope(ueff);
+	bool ticks = ueff->type == FF_PERIODIC || ueff->type == FF_RAMP;
+
+	/* Only combinable effects can be periodically reprocessed */
+	if (!ffpl_is_combinable(ueff)) {
+		printk(KERN_NOTICE "KLGDFF: Effect not combinable, won't recalculate\n");
+		return false;
+	}
+
+	if (!env) {
+		printk(KERN_NOTICE "KLGDFF: Effect type does not support envelope, no need to recalculate\n");
+		return false;
+	}
+
+	if (!env->attack_length && !env->fade_length && !ticks) {
+		printk(KERN_NOTICE "KLGDFF: Effect has no envelope and does not tick, no need to recalculate\n");
+		return false;
+	}
+
+	/*
+	if (!env->fade_length && time_playing >= msecs_to_jiffies(env->attack_length) && !ticks) {
+		printk(KERN_NOTICE "KLGDFF: Envelope has finished attacking, it does not fade and it does not tick, no need to recalculate\n");
+		return false;
+	}*/
+	/* Effect is done fading and shall be stopped.
+	 * Stopping of the effect is handled elsewhere */
+	if (ueff->replay.length && time_after_eq(now, stop_at)) {
+		printk(KERN_NOTICE "KLGDFF: Effect has finished, no need to recalculate\n");
+		return false;
+	}
+
+	printk(KERN_NOTICE "KLGDFF: Effect needs recalculation");
+	return true;
+}
+
+static void ffpl_advance_trigger(struct ffpl_effect *eff, const unsigned long now)
+{
+	switch (eff->trigger) {
+	case FFPL_TRIG_START:
+		if (ffpl_needs_recalculation(&eff->latest, eff->stop_at, now)) {
+			eff->trigger = FFPL_TRIG_RECALC;
+			break;
+		}
+		if (eff->latest.replay.length)
+			eff->trigger = FFPL_TRIG_STOP;
+		else
+			eff->trigger = FFPL_TRIG_NONE;
+		break;
+	case FFPL_TRIG_RESTART:
+		eff->trigger = FFPL_TRIG_STOP;
+		break;
+	case FFPL_TRIG_RECALC:
+		if (ffpl_needs_recalculation(&eff->active, eff->stop_at, now))
+			break;
+		if (eff->active.replay.length) {
+			eff->trigger = FFPL_TRIG_STOP;
+			break;
+		}
+		eff->trigger = FFPL_TRIG_NONE;
+		break;
+	case FFPL_TRIG_STOP:
+		if (eff->repeat > 0) {
+			eff->trigger = FFPL_TRIG_RESTART;
+			break;
+		}
+	case FFPL_TRIG_NOW:
+		eff->trigger = FFPL_TRIG_NONE;
+		break;
+	case FFPL_TRIG_UPDATE:
+		if (ffpl_needs_recalculation(&eff->active, eff->stop_at, now))
+			eff->trigger = FFPL_TRIG_RECALC;
+		else
+			eff->trigger = FFPL_TRIG_NONE;
+		break;
+	default:
+		break;
+	}
 }
 
 static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, const unsigned long now)
@@ -690,106 +863,13 @@ static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, 
 		ret = ffpl_handle_state_change(priv, s, eff, now);
 		/* TODO: Do something useful with the return code */
 		if (ret)
-			printk(KERN_WARNING "KLGDFF: Cannot get command stream effect %lu\n", idx);
+			printk(KERN_WARNING "KLGDFF: Cannot get command stream for effect %lu\n", idx);
+
+		ffpl_advance_trigger(eff, now);
 	}
 
 
 	return s;
-}
-
-static unsigned long ffpl_get_recalculation_time(const struct ffpl_effect *eff)
-{
-	unsigned long t_trip;
-	const struct ff_effect *ueff = &eff->active;
-	const struct ff_envelope *env = ffpl_get_envelope(ueff);
-
-	/* Is the envelope attacking */
-	t_trip = eff->start_at + msecs_to_jiffies(env->attack_length); /* Time of the end of the attack */
-	if (time_before(eff->updated_at, t_trip)) {
-		printk(KERN_NOTICE "KLGDFF: Envelope attacking\n");
-		return eff->updated_at + msecs_to_jiffies(RECALC_DELTA_T_MSEC);
-	}
-
-	t_trip = eff->stop_at - msecs_to_jiffies(env->fade_length); /* Time of the beginning of the fade */
-	if (time_before(eff->updated_at, t_trip)) {
-		printk(KERN_NOTICE "KLGDFF: Envelope waiting to fade\n");
-		return t_trip;	/* Schedule an update for the beginning of the fade */
-	}
-
-	printk(KERN_NOTICE "KLGDFF: Envelope is fading\n");
-	return eff->updated_at + msecs_to_jiffies(RECALC_DELTA_T_MSEC); /* Continue fading */
-}
-
-static bool ffpl_needs_recalculation(const struct ff_effect *ueff, const unsigned long time_playing, const unsigned long stop_at,
-				     const unsigned long now)
-{
-	const struct ff_envelope *env = ffpl_get_envelope(ueff);
-
-	/* Only combinable effects can be periodically reprocessed */
-	if (!ffpl_is_combinable(ueff)) {
-		printk(KERN_NOTICE "KLGDFF: Effect not combinable, won't recalculate\n");
-		return false;
-	}
-
-	if (!env) {
-		printk(KERN_NOTICE "KLGDFF: Effect type does not support envelope, no need to recalculate\n");
-		return false;
-	}
-
-	if (!env->attack_length && !env->fade_length) {
-		printk(KERN_NOTICE "KLGDFF: Effect has no envelope, no need to recalculate\n");
-		return false;
-	}
-
-	if (!ueff->replay.length && time_playing >= msecs_to_jiffies(env->attack_length)) {
-		printk(KERN_NOTICE "KLGDFF: Envelope has finished attacking and it does not fade\n");
-		return false;
-	}
-	/* Effect is done fading and shall be stopped.
-	 * Stopping of the effect is handled elsewhere */
-	if (ueff->replay.length && time_after_eq(now, stop_at)) {
-		printk(KERN_NOTICE "KLGDFF: Effect has finished, no need to recalculate\n");
-		return false;
-	}
-
-	printk(KERN_NOTICE "KLGDFF: Effect needs recalculation");
-	return true;
-}
-
-static void ffpl_advance_trigger(struct ffpl_effect *eff, const unsigned long now)
-{
-	switch (eff->trigger) {
-	case FFPL_TRIG_START:
-		if (ffpl_needs_recalculation(&eff->latest, now - eff->start_at, eff->stop_at, now)) {
-			eff->trigger = FFPL_TRIG_RECALC;
-			break;
-		}
-		if (eff->latest.replay.length)
-			eff->trigger = FFPL_TRIG_STOP;
-		else
-			eff->trigger = FFPL_TRIG_NONE;
-		break;
-	case FFPL_TRIG_RESTART:
-		eff->trigger = FFPL_TRIG_STOP;
-		break;
-	case FFPL_TRIG_RECALC:
-		if (ffpl_needs_recalculation(&eff->active, now - eff->start_at, eff->stop_at, now))
-			break;
-		if (eff->active.replay.length) {
-			eff->trigger = FFPL_TRIG_STOP;
-			break;
-		}
-	case FFPL_TRIG_STOP:
-		if (eff->repeat > 0) {
-			eff->trigger = FFPL_TRIG_RESTART;
-			break;
-		}
-	case FFPL_TRIG_NOW:
-		eff->trigger = FFPL_TRIG_NONE;
-		break;
-	default:
-		break;
-	}
 }
 
 static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long now, unsigned long *t)
@@ -804,6 +884,7 @@ static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long n
 
 		switch (eff->trigger) {
 		case FFPL_TRIG_NOW:
+		case FFPL_TRIG_UPDATE:
 			current_t = now;
 			break;
 		case FFPL_TRIG_RESTART:
@@ -819,20 +900,24 @@ static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long n
 			eff->repeat--;
 			break;
 		case FFPL_TRIG_RECALC:
-			current_t = ffpl_get_recalculation_time(eff);
+			current_t = ffpl_get_recalculation_time(eff, now);
 			eff->recalculate = true;
 			break;
 		default:
 			continue;
 		}
 
-		ffpl_advance_trigger(eff, now);
-		if (!events++)
+		if (!events++) {
+			printk(KERN_NOTICE "KLGDFF: First event\n");
 			*t = current_t;
-		else if (time_before(current_t, *t))
+		} else if (time_before(current_t, *t))
 			*t = current_t;
 	}
 
+	if (time_before(*t, now) && events) {
+		printk(KERN_ERR "Scheduling for the past, this must never happen!!!\n");
+		BUG();
+	}
 	return events ? true : false;
 }
 
@@ -1124,7 +1209,7 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 	}
 
 	set_bit(FF_GAIN, dev->ffbit);
-	for (idx = 0; idx <= (FF_EFFECT_MAX - FF_EFFECT_MIN); idx++) {
+	for (idx = 0; idx <= (FF_WAVEFORM_MAX - FF_EFFECT_MIN); idx++) {
 		if (test_bit(idx, &priv->supported_effects)) {
 			printk(KERN_NOTICE "KLGDFF: Has bit %d, effect type %d\n", idx, FF_EFFECT_MIN + idx);
 			input_set_capability(dev, EV_FF, idx + FF_EFFECT_MIN);

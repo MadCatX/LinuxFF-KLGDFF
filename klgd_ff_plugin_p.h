@@ -19,12 +19,13 @@ enum ffpl_state {
 
 /* What to do at the next timing trip point */
 enum ffpl_trigger {
-	FFPL_TRIG_NONE,	  /* No timing event scheduled for and effect */
-	FFPL_TRIG_NOW,	  /* State change has been set elsewhere and is to be processed immediately */
-	FFPL_TRIG_START,  /* Effect is to be started */
-	FFPL_TRIG_RESTART,/* Effect is to be restarted */
-	FFPL_TRIG_STOP,	  /* Effect is to be stopped */
-	FFPL_TRIG_RECALC  /* Effect needs to be recalculated */
+	FFPL_TRIG_NONE,	    /* No timing event scheduled for and effect */
+	FFPL_TRIG_NOW,	    /* State change has been set elsewhere and is to be processed immediately */
+	FFPL_TRIG_START,    /* Effect is to be started */
+	FFPL_TRIG_RESTART,  /* Effect is to be restarted */
+	FFPL_TRIG_STOP,	    /* Effect is to be stopped */
+	FFPL_TRIG_RECALC,   /* Effect needs to be recalculated */
+	FFPL_TRIG_UPDATE    /* Effect needs to be updated */
 };
 
 
@@ -42,7 +43,7 @@ struct ffpl_effect {
 	unsigned long start_at;		/* Time when to start the effect - in jiffies */
 	unsigned long stop_at;		/* Time when to stop the effect - in jiffies */
 	unsigned long updated_at;	/* Time when the effect was recalculated last time - in jiffies */
-	unsigned long playback_time;	/* Used internally by effect processor to calculate periods */
+	u16 playback_time;		/* Used internally by effect processor to calculate periods */
 	bool recalculate;		/* Effect shall be recalculated in the respective processing loop */
 };
 

@@ -213,7 +213,13 @@ static void __exit klgdff_exit(void)
 
 static int __init klgdff_init(void)
 {
-	unsigned long ffbits = FFPL_EFBIT(FF_CONSTANT) | FFPL_EFBIT(FF_RUMBLE);
+	unsigned long ffbits = FFPL_EFBIT(FF_CONSTANT) |
+			       FFPL_EFBIT(FF_RUMBLE) |
+			       FFPL_EFBIT(FF_PERIODIC) | FFPL_EFBIT(FF_SINE)
+						       | FFPL_EFBIT(FF_SQUARE)
+						       | FFPL_EFBIT(FF_SAW_UP)
+						       | FFPL_EFBIT(FF_SAW_DOWN)
+						       | FFPL_EFBIT(FF_TRIANGLE);
 	int ret;
 
 	klgdff_obj = kobject_create_and_add("klgdff_obj", kernel_kobj);
@@ -254,7 +260,7 @@ static int __init klgdff_init(void)
 		printk(KERN_ERR "KLGDFF-TD: Cannot init plugin\n");
 		goto errout_idev;
 	}
-      	ret = input_register_device(dev);
+	ret = input_register_device(dev);
 	if (ret) {
 		printk(KERN_ERR "KLGDFF-TD: Cannot register input device\n");
 		goto errout_regdev;
