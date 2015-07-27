@@ -216,12 +216,8 @@ static void ffpl_constant_to_x_y(const struct ffpl_effect *eff, s32 *x, s32 *y, 
 {
 	const struct ff_effect *ueff = &eff->active;
 	const s32 level = ffpl_apply_envelope(eff, now);
-	s32 _x;
-	s32 _y;
 
-	ffpl_lvl_dir_to_x_y(level, ueff->direction, &_x, &_y);
-	*x += _x;
-	*y += _y;
+	ffpl_lvl_dir_to_x_y(level, ueff->direction, x, y);
 }
 
 static void ffpl_periodic_to_x_y(struct ffpl_effect *eff, s32 *x, s32 *y, const unsigned long now)
@@ -232,8 +228,6 @@ static void ffpl_periodic_to_x_y(struct ffpl_effect *eff, s32 *x, s32 *y, const 
 	const s32 level = ffpl_apply_envelope(eff, now);
 	s32 new = 0;
 	u16 t;
-	s32 _x;
-	s32 _y;
 
 	eff->playback_time += jiffies_to_msecs(now - eff->updated_at);
 	eff->playback_time %= period;
@@ -277,14 +271,45 @@ static void ffpl_periodic_to_x_y(struct ffpl_effect *eff, s32 *x, s32 *y, const 
 	/* Ensure that the offset did not make the value exceed s16 range */
 	new = clamp(new, -0x7fff, 0x7fff);
 	printk(KERN_NOTICE "KLGDFF: Periodic %d\n", new);
-	ffpl_lvl_dir_to_x_y(new, ueff->direction, &_x, &_y);
-	*x += _x;
-	*y += _y;
+	ffpl_lvl_dir_to_x_y(new, ueff->direction, x, y);
 }
 
 static void ffpl_ramp_to_x_y(struct ffpl_effect *eff, s32 *x, s32 *y, const unsigned long now)
 {
-	printk(KERN_NOTICE "FF_RAMP is not implemented yet\n");
+	const struct ff_effect *ueff = &eff->active;
+	const struct ff_envelope *env = ffpl_get_envelope(ueff);
+	const u16 length = ueff->replay.length;
+	const s16 mean = (ueff->u.ramp.start_level + ueff->u.ramp.end_level) / 2;
+	const u16 t = jiffies_to_msecs(now - eff->start_at);
+	const unsigned long attack_stop = eff->start_at + env->attack_length;
+	const unsigned long fade_begin = eff->stop_at - env->fade_length;
+	s32 start = ueff->u.ramp.start_level;
+	s32 end = ueff->u.ramp.end_level;
+	s32 new;
+
+	if (env->attack_length && time_before(now, attack_stop)) {
+		const s32 clength = jiffies_to_msecs(now - eff->start_at);
+		const s32 alength = env->attack_length;
+		s32 attack_level;
+		if (end > start)
+			attack_level = mean - env->attack_level;
+		else
+			attack_level = mean + env->attack_level;
+		start = (start - attack_level) * clength / alength + attack_level;
+	} else if (env->fade_length && time_before_eq(fade_begin, now)) {
+		const s32 clength = jiffies_to_msecs(now - fade_begin);
+		const s32 flength = env->fade_length;
+		s32 fade_level;
+		if (end > start)
+			fade_level = mean + env->fade_level;
+		else
+			fade_level = mean - env->fade_level;
+		end = (fade_level - end) * clength / flength + end;
+	}
+
+	new = ((end - start) * t) / length + start;
+	new = clamp(new, -0x7fff, 0x7fff);
+	ffpl_lvl_dir_to_x_y(new, ueff->direction, x, y);
 }
 
 static void ffpl_recalc_combined(struct klgd_plugin_private *priv, const unsigned long now)
@@ -297,19 +322,21 @@ static void ffpl_recalc_combined(struct klgd_plugin_private *priv, const unsigne
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		struct ffpl_effect *eff = &priv->effects[idx];
 		struct ff_effect *ueff = &eff->active;
+		s32 _x;
+		s32 _y;
 
 		if (eff->state != FFPL_STARTED)
 			continue;
 
 		switch (ueff->type) {
 		case FF_CONSTANT:
-			ffpl_constant_to_x_y(eff, &x, &y, now);
+			ffpl_constant_to_x_y(eff, &_x, &_y, now);
 			break;
 		case FF_PERIODIC:
-			ffpl_periodic_to_x_y(eff, &x, &y, now);
+			ffpl_periodic_to_x_y(eff, &_x, &_y, now);
 			break;
 		case FF_RAMP:
-			ffpl_ramp_to_x_y(eff, &x, &y, now);
+			ffpl_ramp_to_x_y(eff, &_x, &_y, now);
 			break;
 		default:
 			printk(KERN_ERR "KLGDFF: Combinable effect handler tried to process an unccombinable effect! This should not happen!\n");
@@ -317,6 +344,8 @@ static void ffpl_recalc_combined(struct klgd_plugin_private *priv, const unsigne
 		}
 
 		eff->updated_at = now;
+		x += _x;
+		y += _y;
 	}
 
 	ffpl_x_y_to_lvl_dir(x, y, &cb_latest->u.constant.level, &cb_latest->direction);
