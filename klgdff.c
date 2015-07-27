@@ -219,7 +219,8 @@ static int __init klgdff_init(void)
 						       | FFPL_EFBIT(FF_SQUARE)
 						       | FFPL_EFBIT(FF_SAW_UP)
 						       | FFPL_EFBIT(FF_SAW_DOWN)
-						       | FFPL_EFBIT(FF_TRIANGLE);
+						       | FFPL_EFBIT(FF_TRIANGLE) |
+			       FFPL_EFBIT(FF_RAMP);
 	int ret;
 
 	klgdff_obj = kobject_create_and_add("klgdff_obj", kernel_kobj);
