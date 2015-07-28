@@ -71,9 +71,27 @@ static int klgdff_er_stop(struct klgd_command_stream *s, const struct ff_effect 
 
 static int klgdff_start(struct klgd_command_stream *s, const struct ff_effect *effect, const int repeat)
 {
-	char *text = kasprintf(GFP_KERNEL, "Playing effect, type %d, id %d, repeat %d", effect->type, effect->id, repeat);
-	size_t len = strlen(text);
-	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+	char *text;
+	size_t len;
+	struct klgd_command *c;
+
+	switch (effect->type) {
+	case FF_CONSTANT:
+	{
+		s32 x;
+		s32 y;
+
+		ffpl_lvl_dir_to_x_y(effect->u.constant.level, effect->direction, &x, &y);
+		text = kasprintf(GFP_KERNEL, "Playing FF_CONSTANT, level: %d, dir: %u, X: %d, Y: %d", effect->u.constant.level, effect->direction, x, y);
+		break;
+	}
+	default:
+		text = kasprintf(GFP_KERNEL, "Playing effect, type %d, id %d, repeat %d", effect->type, effect->id, repeat);
+		break;
+	}
+
+	len = strlen(text);
+	c = klgd_alloc_cmd(len + 1);
 
 	if (!c)
 		return -ENOMEM;
@@ -99,9 +117,27 @@ static int klgdff_stop(struct klgd_command_stream *s, const struct ff_effect *ef
 
 static int klgdff_update(struct klgd_command_stream *s, const struct ff_effect *effect)
 {
-	char *text = kasprintf(GFP_KERNEL, "Updating effect, type %d, id %d", effect->type, effect->id);
-	size_t len = strlen(text);
-	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+	char *text;
+	size_t len;
+	struct klgd_command *c;
+
+	switch (effect->type) {
+	case FF_CONSTANT:
+	{
+		s32 x;
+		s32 y;
+
+		ffpl_lvl_dir_to_x_y(effect->u.constant.level, effect->direction, &x, &y);
+		text = kasprintf(GFP_KERNEL, "Updating FF_CONSTANT, level: %d, dir: %u, X: %d, Y: %d", effect->u.constant.level, effect->direction, x, y);
+		break;
+	}
+	default:
+		text = kasprintf(GFP_KERNEL, "Updating, type %d, id %d", effect->type, effect->id);
+		break;
+	}
+
+	len = strlen(text);
+	c = klgd_alloc_cmd(len + 1);
 
 	if (!c)
 		return -ENOMEM;
@@ -127,9 +163,27 @@ static int klgdff_upload(struct klgd_command_stream *s, const struct ff_effect *
 
 static int klgdff_up_start(struct klgd_command_stream *s, const struct ff_effect *effect, const int repeat)
 {
-	char *text = kasprintf(GFP_KERNEL, "Uploading and starting effect, type %d, id %d, repeat %d", effect->type, effect->id, repeat);
-	size_t len = strlen(text);
-	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+	char *text;
+	size_t len;
+	struct klgd_command *c;
+
+	switch (effect->type) {
+	case FF_CONSTANT:
+	{
+		s32 x;
+		s32 y;
+
+		ffpl_lvl_dir_to_x_y(effect->u.constant.level, effect->direction, &x, &y);
+		text = kasprintf(GFP_KERNEL, "Uploading and starting FF_CONSTANT, level: %d, dir: %u, X: %d, Y: %d", effect->u.constant.level, effect->direction, x, y);
+		break;
+	}
+	default:
+		text = kasprintf(GFP_KERNEL, "Uploading and starting effect, type %d, id %d, repeat %d", effect->type, effect->id, repeat);
+		break;
+	}
+
+	len = strlen(text);
+	c = klgd_alloc_cmd(len + 1);
 
 	if (!c)
 		return -ENOMEM;
