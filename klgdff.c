@@ -12,6 +12,7 @@ static struct kobject *klgdff_obj;
 static struct input_dev *dev;
 static struct klgd_main klgd;
 static struct klgd_plugin *ff_plugin;
+static u16 gain;
 
 static int klgdff_erase(struct klgd_command_stream *s, const struct ff_effect *effect)
 {
@@ -69,6 +70,22 @@ static int klgdff_er_stop(struct klgd_command_stream *s, const struct ff_effect 
 	return klgd_append_cmd(s, c);
 }
 
+static int klgdff_set_gain(struct klgd_command_stream *s, const u16 _gain)
+{
+	char *text = kasprintf(GFP_KERNEL, "Setting gain to: %u", _gain);
+	size_t len = strlen(text);
+	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+
+	if (!c)
+		return -ENOMEM;
+
+	gain = _gain;
+
+	memcpy(c->bytes, text, len);
+	kfree(text);
+	return klgd_append_cmd(s, c);
+}
+
 static int klgdff_start(struct klgd_command_stream *s, const struct ff_effect *effect, const int repeat)
 {
 	char *text;
@@ -80,9 +97,10 @@ static int klgdff_start(struct klgd_command_stream *s, const struct ff_effect *e
 	{
 		s32 x;
 		s32 y;
+		s16 level = effect->u.constant.level * gain / 0xFFFF;
 
-		ffpl_lvl_dir_to_x_y(effect->u.constant.level, effect->direction, &x, &y);
-		text = kasprintf(GFP_KERNEL, "Playing FF_CONSTANT, level: %d, dir: %u, X: %d, Y: %d", effect->u.constant.level, effect->direction, x, y);
+		ffpl_lvl_dir_to_x_y(level, effect->direction, &x, &y);
+		text = kasprintf(GFP_KERNEL, "Playing FF_CONSTANT, level: %d, dir: %u, X: %d, Y: %d", level, effect->direction, x, y);
 		break;
 	}
 	default:
@@ -126,9 +144,10 @@ static int klgdff_update(struct klgd_command_stream *s, const struct ff_effect *
 	{
 		s32 x;
 		s32 y;
+		s16 level = effect->u.constant.level * gain / 0xFFFF;
 
-		ffpl_lvl_dir_to_x_y(effect->u.constant.level, effect->direction, &x, &y);
-		text = kasprintf(GFP_KERNEL, "Updating FF_CONSTANT, level: %d, dir: %u, X: %d, Y: %d", effect->u.constant.level, effect->direction, x, y);
+		ffpl_lvl_dir_to_x_y(level, effect->direction, &x, &y);
+		text = kasprintf(GFP_KERNEL, "Updating FF_CONSTANT, level: %d, dir: %u, X: %d, Y: %d", level, effect->direction, x, y);
 		break;
 	}
 	default:
@@ -172,9 +191,10 @@ static int klgdff_up_start(struct klgd_command_stream *s, const struct ff_effect
 	{
 		s32 x;
 		s32 y;
+		s16 level = effect->u.constant.level * gain / 0xFFFF;
 
-		ffpl_lvl_dir_to_x_y(effect->u.constant.level, effect->direction, &x, &y);
-		text = kasprintf(GFP_KERNEL, "Uploading and starting FF_CONSTANT, level: %d, dir: %u, X: %d, Y: %d", effect->u.constant.level, effect->direction, x, y);
+		ffpl_lvl_dir_to_x_y(level, effect->direction, &x, &y);
+		text = kasprintf(GFP_KERNEL, "Uploading and starting FF_CONSTANT, level: %d, dir: %u, X: %d, Y: %d", level, effect->direction, x, y);
 		break;
 	}
 	default:
@@ -249,6 +269,8 @@ int klgdff_control(struct input_dev *dev, struct klgd_command_stream *s, const e
         case FFPL_OWR_TO_UPL:
 		return klgdff_owr_upload(s, data.effects.cur, data.effects.old);
 		break;
+	case FFPL_SET_GAIN:
+		return klgdff_set_gain(s, data.gain);
 	default:
 		printk(KERN_NOTICE "KLGDFF-TD - Unhandled command\n");
 		break;
@@ -281,6 +303,7 @@ static int __init klgdff_init(void)
 	if (!klgdff_obj)
 		return -ENOMEM;
 
+
 	ret = klgd_init(&klgd, NULL, klgdff_callback, 1);
 	if (ret) {
 		printk(KERN_ERR "KLGDFF-TD: Cannot initialize KLGD\n");
@@ -300,6 +323,7 @@ static int __init klgdff_init(void)
 	dev->name = kasprintf(GFP_KERNEL, "KLGD-FF TestModule");
 	dev->uniq = kasprintf(GFP_KERNEL, "KLGD-FF TestModule-X");
 	dev->dev.parent = NULL;
+	gain = 0xFFFF;
 
 	input_set_capability(dev, EV_ABS, ABS_X);
 	input_set_capability(dev, EV_ABS, ABS_Y);

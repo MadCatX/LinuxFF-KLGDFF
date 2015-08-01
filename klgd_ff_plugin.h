@@ -10,6 +10,7 @@
 #define FFPL_ERASE_WHEN_STOPPED BIT(3) /* Erases effect from device when it is stopped - this implies HAS_SRT_TO_EMP */
 #define FFPL_REPLACE_UPLOADED BIT(4) /* Device can accept a new effect to UPLOADED state without the need to explicitly stop and erase the previously uploaded effect beforehand */
 #define FFPL_REPLACE_STARTED BIT(5) /* Device can accept a new effect to STARTED state without the need to explicitly stop and erase the previously uploaded effect beforehand */
+#define FFPL_HAS_NATIVE_GAIN BIT(15)  /* Device can adjust the gain by itself */
 
 enum ffpl_control_command {
 	/* Force feedback state transitions */
@@ -22,7 +23,9 @@ enum ffpl_control_command {
 	FFPL_EMP_TO_SRT, /* Upload and start effect */
 	FFPL_SRT_TO_EMP, /* Stop and erase started effect */
 	FFPL_OWR_TO_UPL, /* Overwrite an effect with a new one and set its state to UPLOADED */
-	FFPL_OWR_TO_SRT	 /* Overwrite an effect with a new one and set its state to STARTED */
+	FFPL_OWR_TO_SRT, /* Overwrite an effect with a new one and set its state to STARTED */
+
+	FFPL_SET_GAIN	 /* Set gain */
 };
 
 struct ffpl_effects {
@@ -36,7 +39,6 @@ union ffpl_control_data {
 	u16 ac_magnitude;
 	u16 gain;
 };
-
 
 void ffpl_lvl_dir_to_x_y(const s32 level, const u16 direction, s32 *x, s32 *y);
 int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const size_t effect_count,

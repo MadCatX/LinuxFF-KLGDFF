@@ -14,7 +14,7 @@ enum ffpl_st_change {
 enum ffpl_state {
 	FFPL_EMPTY,	  /* There is no effect in the slot */
 	FFPL_UPLOADED,	  /* Effect in the slot is uploaded to device */
-	FFPL_STARTED,	  /* Effect in the slot is started on device */
+	FFPL_STARTED	  /* Effect in the slot is started on device */
 };
 
 /* What to do at the next timing trip point */
@@ -52,6 +52,7 @@ struct klgd_plugin_private {
 	size_t effect_count;
 	struct input_dev *dev;
 	int (*control)(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data);
+	u16 gain;
 	/* Optional device capabilities */
 	bool has_emp_to_srt;
 	bool has_srt_to_emp;
@@ -59,5 +60,9 @@ struct klgd_plugin_private {
 	bool erase_when_stopped;
 	bool has_owr_to_upl;
 	bool has_owr_to_srt;
-	u32 padding:26;
+	bool has_native_gain;
+	u32 padding_caps:25;
+	/* Device-wide state changes */
+	bool change_gain;
+	u32 padding_dw:31;
 };

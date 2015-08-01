@@ -9,7 +9,6 @@
 
 static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff,
 				    const unsigned long now);
-static bool ffpl_has_gain(const struct ff_effect *eff);
 static bool ffpl_needs_replacing(const struct ff_effect *ac_eff, const struct ff_effect *la_eff);
 
 void ffpl_lvl_dir_to_x_y(const s32 level, const u16 direction, s32 *x, s32 *y)
@@ -496,6 +495,14 @@ static int ffpl_upload_effect(struct klgd_plugin_private *priv, struct klgd_comm
 	return 0;
 }
 
+static int ffpl_set_gain(struct klgd_plugin_private *priv, struct klgd_command_stream *s)
+{
+	union ffpl_control_data data;
+
+	data.gain = priv->gain;
+	return priv->control(priv->dev, s, FFPL_SET_GAIN, data);
+}
+
 static void ffpl_calculate_trip_times(struct ffpl_effect *eff, const unsigned long now)
 {
 	const struct ff_effect *ueff = &eff->latest;
@@ -603,7 +610,6 @@ static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struc
 	return 0;
 }
 
-/*FIXME: Rewrite this! */
 static void ffpl_set_gain_rq(struct input_dev *dev, u16 gain)
 {
 	struct klgd_plugin *self = dev->ff->private;
@@ -612,15 +618,22 @@ static void ffpl_set_gain_rq(struct input_dev *dev, u16 gain)
 
 	klgd_lock_plugins(self->plugins_lock);
 
-	printk(KERN_DEBUG "KLGDFF: Gain set, %u\n", gain);
+	priv->gain = gain;
+	priv->change_gain = true;
+	if (priv->has_native_gain)
+		goto out;
+
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		struct ffpl_effect *eff = &priv->effects[idx];
 
-		if (ffpl_has_gain(&eff->active))
-			eff->change = FFPL_TO_UPDATE;
-	}
-	/* priv->gain = gain;*/
+		if (eff->state != FFPL_STARTED)
+			continue;
 
+		eff->change = FFPL_TO_UPDATE;
+		eff->trigger = FFPL_TRIG_NOW;
+	}
+
+out:
 	klgd_unlock_plugins_sched(self->plugins_lock);
 }
 
@@ -896,40 +909,52 @@ static void ffpl_advance_trigger(struct ffpl_effect *eff, const unsigned long no
 	}
 }
 
-static struct klgd_command_stream * ffpl_get_commands(struct klgd_plugin *self, const unsigned long now)
+static int ffpl_get_commands(struct klgd_plugin *self, struct klgd_command_stream **s, const unsigned long now)
 {
 	struct klgd_plugin_private *priv = self->private;
-	struct klgd_command_stream *s;
 	size_t idx;
 	int ret;
 
-	s = klgd_alloc_stream();
+	*s = klgd_alloc_stream();
 	if (!s)
-		return NULL; /* TODO: Error handling */
+		return -EAGAIN;
 
-	ret = ffpl_handle_combinable_effects(priv, s, now);
-	if (ret)
+	if (priv->change_gain) {
+		ret = ffpl_set_gain(priv, *s);
+		if (ret)
+			goto out;
+		priv->change_gain = false;
+	}
+
+	ret = ffpl_handle_combinable_effects(priv, *s, now);
+	if (ret) {
 		printk(KERN_WARNING "KLGDFF: Cannot process combinable effects, ret %d\n", ret);
+		goto out;
+	}
 
 	/* Handle combined effect here */
-	ret = ffpl_handle_state_change(priv, s, &priv->combined_effect, now);
-	if (ret)
+	ret = ffpl_handle_state_change(priv, *s, &priv->combined_effect, now);
+	if (ret) {
 		printk(KERN_WARNING "KLGDFF: Cannot get command stream for combined effect\n");
+		goto out;
+	}
 
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		struct ffpl_effect *eff = &priv->effects[idx];
 
 		printk(KERN_NOTICE "KLGDFF: Processing effect %lu\n", idx);
-		ret = ffpl_handle_state_change(priv, s, eff, now);
+		ret = ffpl_handle_state_change(priv, *s, eff, now);
 		/* TODO: Do something useful with the return code */
-		if (ret)
+		if (ret) {
 			printk(KERN_WARNING "KLGDFF: Cannot get command stream for effect %lu\n", idx);
+			goto out;
+		}
 
 		ffpl_advance_trigger(eff, now);
 	}
 
-
-	return s;
+out:
+	return ret;
 }
 
 static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long now, unsigned long *t)
@@ -937,6 +962,12 @@ static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long n
 	struct klgd_plugin_private *priv = self->private;
 	size_t idx;
 	unsigned long events = 0;
+
+	/* Handle device-wide changes first */
+	if (priv->change_gain) {
+		*t = now;
+		return true;
+	}
 
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		unsigned long current_t;
@@ -1165,19 +1196,6 @@ static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klg
 	return ret;
 }
 
-static bool ffpl_has_gain(const struct ff_effect *eff)
-{
-	switch (eff->type) {
-	case FF_CONSTANT:
-        case FF_PERIODIC:
-	case FF_RAMP:
-	case FF_RUMBLE:
-		return true;
-	default:
-		return false;
-	}
-}
-
 static int ffpl_init(struct klgd_plugin *self)
 {
 	struct klgd_plugin_private *priv = self->private;
@@ -1239,6 +1257,7 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 	priv->effect_count = effect_count;
 	priv->dev = dev;
 	priv->control = control;
+	priv->gain = 0xFFFF;
 
 	self->private = priv;
 	*plugin = self;
@@ -1268,6 +1287,10 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 	if (FFPL_REPLACE_STARTED & flags) {
 		priv->has_owr_to_srt = true;
 		printk("KLGDFF: Using REPLACE STARTED\n");
+	}
+	if (FFPL_HAS_NATIVE_GAIN & flags) {
+		priv->has_native_gain = true;
+		printk(KERN_NOTICE "KLGDFF: Using HAS_NATIVE_GAIN\n");
 	}
 
 	set_bit(FF_GAIN, dev->ffbit);
