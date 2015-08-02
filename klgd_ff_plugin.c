@@ -495,6 +495,14 @@ static int ffpl_upload_effect(struct klgd_plugin_private *priv, struct klgd_comm
 	return 0;
 }
 
+static int ffpl_set_autocenter(struct klgd_plugin_private *priv, struct klgd_command_stream *s)
+{
+	union ffpl_control_data data;
+
+	data.autocenter = priv->autocenter;
+	return priv->control(priv->dev, s, FFPL_SET_AUTOCENTER, data);
+}
+
 static int ffpl_set_gain(struct klgd_plugin_private *priv, struct klgd_command_stream *s)
 {
 	union ffpl_control_data data;
@@ -608,6 +616,19 @@ static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struc
 	klgd_unlock_plugins_sched(self->plugins_lock);
 
 	return 0;
+}
+
+static void ffpl_set_autocenter_rq(struct input_dev *dev, u16 autocenter)
+{
+	struct klgd_plugin *self = dev->ff->private;
+	struct klgd_plugin_private *priv = self->private;
+
+	klgd_lock_plugins(self->plugins_lock);
+
+	priv->autocenter = autocenter;
+	priv->change_autocenter = true;
+
+	klgd_unlock_plugins_sched(self->plugins_lock);
 }
 
 static void ffpl_set_gain_rq(struct input_dev *dev, u16 gain)
@@ -921,6 +942,12 @@ static int ffpl_get_commands(struct klgd_plugin *self, struct klgd_command_strea
 	if (!s)
 		return -EAGAIN;
 
+	if (priv->change_autocenter) {
+		ret = ffpl_set_autocenter(priv, *s);
+		if (ret)
+			goto out;
+		priv->change_autocenter = false;
+	}
 	if (priv->change_gain) {
 		ret = ffpl_set_gain(priv, *s);
 		if (ret)
@@ -966,7 +993,7 @@ static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long n
 	unsigned long events = 0;
 
 	/* Handle device-wide changes first */
-	if (priv->change_gain) {
+	if (priv->change_gain || priv->change_autocenter) {
 		*t = now;
 		return true;
 	}
@@ -1213,6 +1240,7 @@ static int ffpl_init(struct klgd_plugin *self)
 	dev->ff->playback = ffpl_playback_rq;
 	dev->ff->upload = ffpl_upload_rq;
 	dev->ff->set_gain = ffpl_set_gain_rq;
+	dev->ff->set_autocenter = ffpl_set_autocenter_rq;
 	dev->ff->destroy = ffpl_destroy_rq;
 	printk(KERN_NOTICE "KLGDFF: Init complete\n");
 
@@ -1293,6 +1321,11 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 	if (FFPL_HAS_NATIVE_GAIN & flags) {
 		priv->has_native_gain = true;
 		printk(KERN_NOTICE "KLGDFF: Using HAS_NATIVE_GAIN\n");
+	}
+	if (FFPL_HAS_AUTOCENTER & flags) {
+		priv->has_autocenter = true;
+		set_bit(FF_AUTOCENTER, dev->ffbit);
+		printk(KERN_NOTICE "KLGDFF: Using HAS_AUTOCENTER\n");
 	}
 
 	set_bit(FF_GAIN, dev->ffbit);

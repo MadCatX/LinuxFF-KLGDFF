@@ -53,6 +53,7 @@ struct klgd_plugin_private {
 	struct input_dev *dev;
 	int (*control)(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data);
 	u16 gain;
+	u16 autocenter;
 	/* Optional device capabilities */
 	bool has_emp_to_srt;
 	bool has_srt_to_emp;
@@ -61,8 +62,10 @@ struct klgd_plugin_private {
 	bool has_owr_to_upl;
 	bool has_owr_to_srt;
 	bool has_native_gain;
-	u32 padding_caps:25;
+	bool has_autocenter;
+	u32 padding_caps:24;
 	/* Device-wide state changes */
 	bool change_gain;
-	u32 padding_dw:31;
+	bool change_autocenter;
+	u32 padding_dw:30;
 };

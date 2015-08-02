@@ -11,6 +11,7 @@
 #define FFPL_REPLACE_UPLOADED BIT(4) /* Device can accept a new effect to UPLOADED state without the need to explicitly stop and erase the previously uploaded effect beforehand */
 #define FFPL_REPLACE_STARTED BIT(5) /* Device can accept a new effect to STARTED state without the need to explicitly stop and erase the previously uploaded effect beforehand */
 #define FFPL_HAS_NATIVE_GAIN BIT(15)  /* Device can adjust the gain by itself */
+#define FFPL_HAS_AUTOCENTER BIT(16) /* Device supports autocentering */
 
 enum ffpl_control_command {
 	/* Force feedback state transitions */
@@ -25,7 +26,8 @@ enum ffpl_control_command {
 	FFPL_OWR_TO_UPL, /* Overwrite an effect with a new one and set its state to UPLOADED */
 	FFPL_OWR_TO_SRT, /* Overwrite an effect with a new one and set its state to STARTED */
 
-	FFPL_SET_GAIN	 /* Set gain */
+	FFPL_SET_GAIN,	 /* Set gain */
+	FFPL_SET_AUTOCENTER /*Set autocenter */
 };
 
 struct ffpl_effects {
@@ -36,7 +38,7 @@ struct ffpl_effects {
 
 union ffpl_control_data {
 	struct ffpl_effects effects;
-	u16 ac_magnitude;
+	u16 autocenter;
 	u16 gain;
 };
 

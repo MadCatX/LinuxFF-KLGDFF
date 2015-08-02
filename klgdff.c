@@ -13,6 +13,7 @@ static struct input_dev *dev;
 static struct klgd_main klgd;
 static struct klgd_plugin *ff_plugin;
 static u16 gain;
+static u16 autocenter;
 
 static int klgdff_erase(struct klgd_command_stream *s, const struct ff_effect *effect)
 {
@@ -64,6 +65,22 @@ static int klgdff_er_stop(struct klgd_command_stream *s, const struct ff_effect 
 
 	if (!c)
 		return -ENOMEM;
+
+	memcpy(c->bytes, text, len);
+	kfree(text);
+	return klgd_append_cmd(s, c);
+}
+
+static int klgdff_set_autocenter(struct klgd_command_stream *s, const u16 _autocenter)
+{
+	char *text = kasprintf(GFP_KERNEL, "Setting autocenter to: %u", _autocenter);
+	size_t len = strlen(text);
+	struct klgd_command *c = klgd_alloc_cmd(len + 1);
+
+	if (!c)
+		return -ENOMEM;
+
+	autocenter = _autocenter;
 
 	memcpy(c->bytes, text, len);
 	kfree(text);
@@ -271,6 +288,8 @@ int klgdff_control(struct input_dev *dev, struct klgd_command_stream *s, const e
 		break;
 	case FFPL_SET_GAIN:
 		return klgdff_set_gain(s, data.gain);
+	case FFPL_SET_AUTOCENTER:
+		return klgdff_set_autocenter(s, data.autocenter);
 	default:
 		printk(KERN_NOTICE "KLGDFF-TD - Unhandled command\n");
 		break;
@@ -333,7 +352,7 @@ static int __init klgdff_init(void)
 	input_set_abs_params(dev, ABS_Y, -0x7fff, 0x7fff, 0, 0);
 
 	ret = ffpl_init_plugin(&ff_plugin, dev, EFFECT_COUNT, ffbits,
-			       FFPL_HAS_EMP_TO_SRT | FFPL_REPLACE_STARTED,
+			       FFPL_HAS_EMP_TO_SRT | FFPL_REPLACE_STARTED | FFPL_HAS_AUTOCENTER,
 			       klgdff_control);
 	if (ret) {
 		printk(KERN_ERR "KLGDFF-TD: Cannot init plugin\n");
