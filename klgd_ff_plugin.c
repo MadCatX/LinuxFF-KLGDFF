@@ -338,7 +338,7 @@ static void ffpl_recalc_combined(struct klgd_plugin_private *priv, const unsigne
 			ffpl_ramp_to_x_y(eff, &_x, &_y, now);
 			break;
 		default:
-			printk(KERN_ERR "KLGDFF: Combinable effect handler tried to process an unccombinable effect! This should not happen!\n");
+			printk(KERN_ERR "KLGDFF: Combinable effect handler tried to process an uncombinable effect! This should not happen!\n");
 			break;
 		}
 
@@ -629,8 +629,10 @@ static void ffpl_set_gain_rq(struct input_dev *dev, u16 gain)
 		if (eff->state != FFPL_STARTED)
 			continue;
 
-		eff->change = FFPL_TO_UPDATE;
-		eff->trigger = FFPL_TRIG_NOW;
+		if (eff->change == FFPL_DONT_TOUCH && eff->trigger != FFPL_TRIG_RECALC) {
+			eff->change = FFPL_TO_UPDATE;
+			eff->trigger = FFPL_TRIG_NOW;
+		}
 	}
 
 out:
