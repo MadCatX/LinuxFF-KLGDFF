@@ -10,6 +10,18 @@
 #define FFPL_ERASE_WHEN_STOPPED BIT(3) /* Erases effect from device when it is stopped - this implies HAS_SRT_TO_EMP */
 #define FFPL_REPLACE_UPLOADED BIT(4) /* Device can accept a new effect to UPLOADED state without the need to explicitly stop and erase the previously uploaded effect beforehand */
 #define FFPL_REPLACE_STARTED BIT(5) /* Device can accept a new effect to STARTED state without the need to explicitly stop and erase the previously uploaded effect beforehand */
+
+#define FFPL_MEMLESS_MODE BIT(6)     /* Device cannot process effects by itself and required KLGD-FF to do all calculations for it. */
+#define FFPL_MEMLESS_PERIODIC BIT(7) /* Device cannot process FF_PERIODIC by itself and requires KLGD-FF to calculate the overall force.
+					Device must support FF_CONSTANT for this to work.
+				        This flag implies FFPL_MEMLESS_MODE */
+#define FFPL_MEMLESS_RAMP BIT(8)     /* Device cannot process FF_RAMP by itself and requires KLGD-FF to calculate the overall force.
+					Device must support FF_CONSTANT for this to work.
+					This flag implies FFPL_MEMLESS_MODE */
+#define FFPL_CONTROL_TIMING BIT(9)   /* Device cannot handle effects with finite duration, delays and repeated effects. Let KLGD-FF take care
+					of starting, stopping and restarting effects at appropriate times.
+					FFPL_MEMLESS_MODE implies this flag. */
+
 #define FFPL_HAS_NATIVE_GAIN BIT(15)  /* Device can adjust the gain by itself */
 #define FFPL_HAS_AUTOCENTER BIT(16) /* Device supports autocentering */
 

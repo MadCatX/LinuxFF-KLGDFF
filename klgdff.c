@@ -83,6 +83,7 @@ static int klgdff_set_autocenter(struct klgd_command_stream *s, const u16 _autoc
 	autocenter = _autocenter;
 
 	memcpy(c->bytes, text, len);
+	c->user = (unsigned long)0xDEADBEEF;
 	kfree(text);
 	return klgd_append_cmd(s, c);
 }
@@ -235,8 +236,11 @@ int klgdff_callback(void *data, const struct klgd_command_stream *s)
 	size_t idx;
 
 	printk(KERN_NOTICE "KLGDTM - EFF...\n");
-	for (idx = 0; idx < s->count; idx++)
+	for (idx = 0; idx < s->count; idx++) {
 		printk(KERN_NOTICE "KLGDFF-TD: EFF %s\n", s->commands[idx]->bytes);
+		if (s->commands[idx]->user)
+			printk("KLGDFF-TD: User 0x%x\n", (unsigned int)s->commands[idx]->user);
+	}
 
 	/* Simulate default USB polling rate of 125 Hz */
 	/*usleep_range(7500, 8500);*/
@@ -315,7 +319,9 @@ static int __init klgdff_init(void)
 						       | FFPL_EFBIT(FF_SAW_UP)
 						       | FFPL_EFBIT(FF_SAW_DOWN)
 						       | FFPL_EFBIT(FF_TRIANGLE) |
-			       FFPL_EFBIT(FF_RAMP);
+			       FFPL_EFBIT(FF_RAMP) |
+			       FFPL_EFBIT(FF_SPRING);
+
 	int ret;
 
 	klgdff_obj = kobject_create_and_add("klgdff_obj", kernel_kobj);
@@ -352,7 +358,7 @@ static int __init klgdff_init(void)
 	input_set_abs_params(dev, ABS_Y, -0x7fff, 0x7fff, 0, 0);
 
 	ret = ffpl_init_plugin(&ff_plugin, dev, EFFECT_COUNT, ffbits,
-			       FFPL_HAS_EMP_TO_SRT | FFPL_REPLACE_STARTED | FFPL_HAS_AUTOCENTER,
+			       FFPL_HAS_EMP_TO_SRT | FFPL_REPLACE_STARTED | FFPL_HAS_AUTOCENTER | FFPL_MEMLESS_MODE,
 			       klgdff_control);
 	if (ret) {
 		printk(KERN_ERR "KLGDFF-TD: Cannot init plugin\n");

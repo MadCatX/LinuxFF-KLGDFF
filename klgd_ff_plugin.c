@@ -20,14 +20,15 @@ void ffpl_lvl_dir_to_x_y(const s32 level, const u16 direction, s32 *x, s32 *y)
 	*y = (level * fixp_sin16(degrees)) >> FRAC_16;
 }
 
-static bool ffpl_is_combinable(const struct ff_effect *eff)
+static bool ffpl_process_memless(const struct klgd_plugin_private *priv, const struct ff_effect *eff)
 {
-	/* TODO: Proper decision of what is a combinable effect */
 	switch (eff->type) {
 	case FF_CONSTANT:
+		return priv->memless_mode;
 	case FF_PERIODIC:
+		return priv->memless_periodic;
 	case FF_RAMP:
-		return true;
+		return priv->memless_ramp;
 	default:
 		return false;
 	}
@@ -50,6 +51,7 @@ static const struct ff_envelope * ffpl_get_envelope(const struct ff_effect *ueff
 static bool ffpl_is_effect_valid(const struct ff_effect *ueff)
 {
 	const u16 length = ueff->replay.length;
+	const struct ff_envelope *env = ffpl_get_envelope(ueff);
 
 	/* Periodic effects must have a non-zero period */
 	if (ueff->type == FF_PERIODIC) {
@@ -60,14 +62,8 @@ static bool ffpl_is_effect_valid(const struct ff_effect *ueff)
 	if (ueff->type == FF_RAMP && !length)
 		return false;
 
-	if (ffpl_is_combinable(ueff)) {
+	if (env) {
 		int fade_from;
-		const struct ff_envelope *env = ffpl_get_envelope(ueff);
-
-		if (!env) {
-			printk(KERN_ERR "KLGDFF: NULL envelope in validity check. This cannot happen!\n");
-			return false;
-		}
 
 		/* Infinite effects cannot fade */
 		if (!length && env->fade_length > 0)
@@ -454,6 +450,12 @@ static int ffpl_stop_effect(struct klgd_plugin_private *priv, struct klgd_comman
 	if (cmd == FFPL_SRT_TO_EMP)
 		eff->uploaded_to_device = false;
 	eff->state = FFPL_UPLOADED;
+
+
+	/* Report back that the effect has stopped */
+	if (eff->trigger == FFPL_TRIG_STOP)
+		input_report_ff_status(dev, eff->active.id, FF_STATUS_STOPPED);
+
 	return 0;
 }
 
@@ -568,7 +570,10 @@ static int ffpl_playback_rq(struct input_dev *dev, int effect_id, int value)
 
 	eff->repeat = value;
 	if (value > 0) {
-		ffpl_calculate_trip_times(eff, now);
+		if (priv->control_timing && ffpl_process_memless(priv, &eff->active))
+			ffpl_calculate_trip_times(eff, now);
+		else
+			eff->start_at = now; /* Start the effect right away and let the device deal with the timing */
 		eff->trigger = FFPL_TRIG_START;
 	} else {
 		eff->change = FFPL_TO_STOP;
@@ -678,7 +683,7 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 
 		if (eff->replace) {
 			/* Uncombinable effect is about to be replaced by a combinable one */
-			if (ffpl_is_combinable(&eff->latest)) {
+			if (ffpl_process_memless(priv, &eff->latest)) {
 				printk(KERN_NOTICE "KLGDFF: Replacing uncombinable with combinable\n");
 				switch (eff->state) {
 				case FFPL_STARTED:
@@ -702,7 +707,7 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 				continue;
 			}
 		} else {
-			if (!ffpl_is_combinable(&eff->latest))
+			if (!ffpl_process_memless(priv, &eff->latest))
 				continue;
 		}
 
@@ -851,13 +856,14 @@ static unsigned long ffpl_get_recalculation_time(const struct ffpl_effect *eff, 
 	return ffpl_get_env_recalculation_time(eff, now);
 }
 
-static bool ffpl_needs_recalculation(const struct ff_effect *ueff, const unsigned long start_at, const unsigned long stop_at, const unsigned long now)
+static bool ffpl_needs_recalculation(const struct klgd_plugin_private *priv, const struct ff_effect *ueff, const unsigned long start_at,
+				     const unsigned long stop_at, const unsigned long now)
 {
 	const struct ff_envelope *env = ffpl_get_envelope(ueff);
 	bool ticks = ueff->type == FF_PERIODIC || ueff->type == FF_RAMP;
 
-	/* Only combinable effects can be periodically reprocessed */
-	if (!ffpl_is_combinable(ueff)) {
+	/* Only effects handled by memless mode can be periodically reprocessed */
+	if (!ffpl_process_memless(priv, ueff)) {
 		printk(KERN_NOTICE "KLGDFF: Effect not combinable, won't recalculate\n");
 		return false;
 	}
@@ -888,15 +894,15 @@ static bool ffpl_needs_recalculation(const struct ff_effect *ueff, const unsigne
 	return true;
 }
 
-static void ffpl_advance_trigger(struct ffpl_effect *eff, const unsigned long now)
+static void ffpl_advance_trigger(const struct klgd_plugin_private *priv, struct ffpl_effect *eff, const unsigned long now)
 {
 	switch (eff->trigger) {
 	case FFPL_TRIG_START:
-		if (ffpl_needs_recalculation(&eff->latest, eff->start_at, eff->stop_at, now)) {
+		if (ffpl_needs_recalculation(priv, &eff->latest, eff->start_at, eff->stop_at, now)) {
 			eff->trigger = FFPL_TRIG_RECALC;
 			break;
 		}
-		if (eff->latest.replay.length)
+		if (eff->latest.replay.length && priv->control_timing && ffpl_process_memless(priv, &eff->latest))
 			eff->trigger = FFPL_TRIG_STOP;
 		else
 			eff->trigger = FFPL_TRIG_NONE;
@@ -905,16 +911,16 @@ static void ffpl_advance_trigger(struct ffpl_effect *eff, const unsigned long no
 		eff->trigger = FFPL_TRIG_STOP;
 		break;
 	case FFPL_TRIG_RECALC:
-		if (ffpl_needs_recalculation(&eff->active, eff->start_at, eff->stop_at, now))
+		if (ffpl_needs_recalculation(priv, &eff->active, eff->start_at, eff->stop_at, now))
 			break;
-		if (eff->active.replay.length) {
+		if (eff->active.replay.length && priv->control_timing && ffpl_process_memless(priv, &eff->active)) {
 			eff->trigger = FFPL_TRIG_STOP;
 			break;
 		}
 		eff->trigger = FFPL_TRIG_NONE;
 		break;
 	case FFPL_TRIG_STOP:
-		if (eff->repeat > 0) {
+		if (eff->repeat > 0 && priv->control_timing && ffpl_process_memless(priv, &eff->active)) {
 			eff->trigger = FFPL_TRIG_RESTART;
 			break;
 		}
@@ -922,7 +928,7 @@ static void ffpl_advance_trigger(struct ffpl_effect *eff, const unsigned long no
 		eff->trigger = FFPL_TRIG_NONE;
 		break;
 	case FFPL_TRIG_UPDATE:
-		if (ffpl_needs_recalculation(&eff->active, eff->start_at, eff->stop_at, now) && eff->state == FFPL_STARTED)
+		if (ffpl_needs_recalculation(priv, &eff->active, eff->start_at, eff->stop_at, now) && eff->state == FFPL_STARTED)
 			eff->trigger = FFPL_TRIG_RECALC;
 		else
 			eff->trigger = FFPL_TRIG_NONE;
@@ -979,7 +985,7 @@ static int ffpl_get_commands(struct klgd_plugin *self, struct klgd_command_strea
 			goto out;
 		}
 
-		ffpl_advance_trigger(eff, now);
+		ffpl_advance_trigger(priv, eff, now);
 	}
 
 out:
@@ -1318,6 +1324,22 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 		priv->has_owr_to_srt = true;
 		printk("KLGDFF: Using REPLACE STARTED\n");
 	}
+	if (FFPL_MEMLESS_MODE & flags) {
+		priv->memless_mode = true;
+		priv->control_timing = true;
+	}
+	if (FFPL_MEMLESS_PERIODIC & flags) {
+		priv->memless_mode = true;
+		priv->memless_periodic = true;
+		priv->control_timing = true;
+	}
+	if (FFPL_MEMLESS_RAMP & flags) {
+		priv->memless_mode = true;
+		priv->memless_ramp = true;
+		priv->control_timing = true;
+	}
+	if (FFPL_CONTROL_TIMING & flags)
+	      priv->control_timing = true;
 	if (FFPL_HAS_NATIVE_GAIN & flags) {
 		priv->has_native_gain = true;
 		printk(KERN_NOTICE "KLGDFF: Using HAS_NATIVE_GAIN\n");
@@ -1327,7 +1349,6 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 		set_bit(FF_AUTOCENTER, dev->ffbit);
 		printk(KERN_NOTICE "KLGDFF: Using HAS_AUTOCENTER\n");
 	}
-
 	set_bit(FF_GAIN, dev->ffbit);
 	for (idx = 0; idx <= (FF_WAVEFORM_MAX - FF_EFFECT_MIN); idx++) {
 		if (test_bit(idx, &priv->supported_effects)) {
