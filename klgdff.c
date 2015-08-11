@@ -14,6 +14,7 @@ static struct klgd_main klgd;
 static struct klgd_plugin *ff_plugin;
 static u16 gain;
 static u16 autocenter;
+static u32 test_user = 0xC001CAFE;
 
 static int klgdff_erase(struct klgd_command_stream *s, const struct ff_effect *effect)
 {
@@ -239,7 +240,7 @@ int klgdff_callback(void *data, const struct klgd_command_stream *s)
 	for (idx = 0; idx < s->count; idx++) {
 		printk(KERN_NOTICE "KLGDFF-TD: EFF %s\n", s->commands[idx]->bytes);
 		if (s->commands[idx]->user.data[0])
-			printk("KLGDFF-TD: User 0x%X\n", s->commands[idx]->user.data[0]);
+			printk(KERN_NOTICE "KLGDFF-TD: User1 0x%X\n", s->commands[idx]->user.data[0]);
 	}
 
 	/* Simulate default USB polling rate of 125 Hz */
@@ -250,16 +251,13 @@ int klgdff_callback(void *data, const struct klgd_command_stream *s)
 	return 0;
 }
 
-int klgdff_control(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data)
+int klgdff_control(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd,
+		   const union ffpl_control_data data, void *user)
 {
 	if (!s)
 		return -EINVAL;
 
-	if (!data.effects.cur) {
-		printk(KERN_WARNING "KLGDFF-TM: NULL effect, this _cannot_ happen!\n");
-		return -EINVAL;
-	}
-
+	printk(KERN_NOTICE "KLGDFF-TD: User data: 0x%X\n", *(u32 *)user);
 	switch (cmd) {
 	case FFPL_EMP_TO_UPL:
 		return klgdff_upload(s, data.effects.cur);
@@ -359,7 +357,7 @@ static int __init klgdff_init(void)
 
 	ret = ffpl_init_plugin(&ff_plugin, dev, EFFECT_COUNT, ffbits,
 			       FFPL_HAS_EMP_TO_SRT | FFPL_REPLACE_STARTED | FFPL_HAS_AUTOCENTER | FFPL_MEMLESS_MODE,
-			       klgdff_control);
+			       klgdff_control, &test_user);
 	if (ret) {
 		printk(KERN_ERR "KLGDFF-TD: Cannot init plugin\n");
 		goto errout_idev;

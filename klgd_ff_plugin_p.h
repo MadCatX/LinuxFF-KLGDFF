@@ -51,7 +51,8 @@ struct klgd_plugin_private {
 	unsigned long supported_effects;
 	size_t effect_count;
 	struct input_dev *dev;
-	int (*control)(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data);
+	int (*control)(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data, void *user);
+	void *user;
 	u16 gain;
 	u16 autocenter;
 	/* Optional device capabilities */

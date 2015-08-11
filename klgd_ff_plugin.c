@@ -358,7 +358,7 @@ static int ffpl_erase_effect(struct klgd_plugin_private *priv, struct klgd_comma
 
 		data.effects.cur = &eff->active;
 		data.effects.old = NULL;
-		ret = priv->control(dev, s, FFPL_UPL_TO_EMP, data);
+		ret = priv->control(dev, s, FFPL_UPL_TO_EMP, data, priv->user);
 		if (ret)
 			return ret;
 	}
@@ -378,7 +378,7 @@ static int ffpl_replace_effect(struct klgd_plugin_private *priv, struct klgd_com
 	data.effects.cur = &eff->latest;
 	data.effects.old = &eff->active;
 	data.effects.repeat = eff->repeat;
-	ret = priv->control(dev, s, cmd, data);
+	ret = priv->control(dev, s, cmd, data, priv->user);
 	if (!ret) {
 		eff->active = eff->latest;
 		eff->state = (cmd == FFPL_OWR_TO_UPL) ? FFPL_UPLOADED : FFPL_STARTED;
@@ -405,7 +405,7 @@ static int ffpl_start_effect(struct klgd_plugin_private *priv, struct klgd_comma
 		else
 			cmd = FFPL_EMP_TO_SRT;
 
-		ret = priv->control(dev, s, cmd, data);
+		ret = priv->control(dev, s, cmd, data, priv->user);
 		if (ret)
 			return ret;
 	} else {
@@ -418,7 +418,7 @@ static int ffpl_start_effect(struct klgd_plugin_private *priv, struct klgd_comma
 			cmd = FFPL_UPL_TO_SRT;
 		}
 
-		ret = priv->control(dev, s, cmd, data);
+		ret = priv->control(dev, s, cmd, data, priv->user);
 		if (ret)
 			return ret;
 		if (cmd == FFPL_EMP_TO_SRT)
@@ -444,7 +444,7 @@ static int ffpl_stop_effect(struct klgd_plugin_private *priv, struct klgd_comman
 	else
 		cmd = FFPL_SRT_TO_UPL;
 
-	ret = priv->control(dev, s, cmd, data);
+	ret = priv->control(dev, s, cmd, data, priv->user);
 	if (ret)
 		return ret;
 	if (cmd == FFPL_SRT_TO_EMP)
@@ -470,7 +470,7 @@ static int ffpl_update_effect(struct klgd_plugin_private *priv, struct klgd_comm
 
 	data.effects.cur = &eff->latest;
 	data.effects.old = NULL;
-	ret = priv->control(dev, s, FFPL_SRT_TO_UDT, data);
+	ret = priv->control(dev, s, FFPL_SRT_TO_UDT, data, priv->user);
 	if (ret)
 		return ret;
 	eff->active = eff->latest;
@@ -486,7 +486,7 @@ static int ffpl_upload_effect(struct klgd_plugin_private *priv, struct klgd_comm
 
 		data.effects.cur = &eff->latest;
 		data.effects.old = NULL;
-		ret = priv->control(dev, s, FFPL_EMP_TO_UPL, data);
+		ret = priv->control(dev, s, FFPL_EMP_TO_UPL, data, priv->user);
 		if (ret)
 			return ret;
 		eff->uploaded_to_device = true;
@@ -502,7 +502,7 @@ static int ffpl_set_autocenter(struct klgd_plugin_private *priv, struct klgd_com
 	union ffpl_control_data data;
 
 	data.autocenter = priv->autocenter;
-	return priv->control(priv->dev, s, FFPL_SET_AUTOCENTER, data);
+	return priv->control(priv->dev, s, FFPL_SET_AUTOCENTER, data, priv->user);
 }
 
 static int ffpl_set_gain(struct klgd_plugin_private *priv, struct klgd_command_stream *s)
@@ -510,7 +510,7 @@ static int ffpl_set_gain(struct klgd_plugin_private *priv, struct klgd_command_s
 	union ffpl_control_data data;
 
 	data.gain = priv->gain;
-	return priv->control(priv->dev, s, FFPL_SET_GAIN, data);
+	return priv->control(priv->dev, s, FFPL_SET_GAIN, data, priv->user);
 }
 
 static void ffpl_calculate_trip_times(struct ffpl_effect *eff, const unsigned long now)
@@ -1257,7 +1257,8 @@ static int ffpl_init(struct klgd_plugin *self)
 int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const size_t effect_count,
 		     const unsigned long supported_effects,
 		     const unsigned long flags,
-		     int (*control)(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data))
+		     int (*control)(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data, void *user),
+		     void *user)
 {
 	struct klgd_plugin *self;
 	struct klgd_plugin_private *priv;
@@ -1293,6 +1294,7 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 	priv->effect_count = effect_count;
 	priv->dev = dev;
 	priv->control = control;
+	priv->user = user;
 	priv->gain = 0xFFFF;
 
 	self->private = priv;
