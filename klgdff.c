@@ -84,7 +84,7 @@ static int klgdff_set_autocenter(struct klgd_command_stream *s, const u16 _autoc
 	autocenter = _autocenter;
 
 	memcpy(c->bytes, text, len);
-	c->user.data[0] = 0xDEADBEEF;
+	c->user.ldata[0] = 0xDEADBEEF;
 	kfree(text);
 	return klgd_append_cmd(s, c);
 }
@@ -239,8 +239,8 @@ int klgdff_callback(void *data, const struct klgd_command_stream *s)
 	printk(KERN_NOTICE "KLGDTM - EFF...\n");
 	for (idx = 0; idx < s->count; idx++) {
 		printk(KERN_NOTICE "KLGDFF-TD: EFF %s\n", s->commands[idx]->bytes);
-		if (s->commands[idx]->user.data[0])
-			printk(KERN_NOTICE "KLGDFF-TD: User1 0x%X\n", s->commands[idx]->user.data[0]);
+		if (s->commands[idx]->user.ldata[0])
+			printk(KERN_NOTICE "KLGDFF-TD: User1 0x%X\n", s->commands[idx]->user.ldata[0]);
 	}
 
 	/* Simulate default USB polling rate of 125 Hz */
