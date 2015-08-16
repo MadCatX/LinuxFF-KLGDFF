@@ -2,6 +2,11 @@
 #include <linux/slab.h>
 #include <linux/fixp-arith.h>
 #include <linux/jiffies.h>
+#include <linux/module.h>
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Michal \"MadCatX\" Maly");
+MODULE_DESCRIPTION("KLGD-FF Module");
 
 #define DIR_TO_DEGREES(dir) (360 - ((((dir > 0xc000) ? (u32)dir + 0x4000 - 0xffff : (u32)dir + 0x4000) * 360) / 0xffff))
 #define FRAC_16 15
@@ -19,6 +24,7 @@ void ffpl_lvl_dir_to_x_y(const s32 level, const u16 direction, s32 *x, s32 *y)
 	*x = (level * fixp_cos16(degrees)) >> FRAC_16;
 	*y = (level * fixp_sin16(degrees)) >> FRAC_16;
 }
+EXPORT_SYMBOL_GPL(ffpl_lvl_dir_to_x_y);
 
 inline static bool ffpl_process_memless(const struct klgd_plugin_private *priv, const struct ff_effect *eff)
 {
@@ -1405,6 +1411,7 @@ err_out1:
 	kfree(self);
 	return ret;
 }
+EXPORT_SYMBOL_GPL(ffpl_init_plugin);
 
 static bool ffpl_needs_replacing(const struct ff_effect *ac_eff, const struct ff_effect *la_eff)
 {

@@ -3,9 +3,9 @@ KBUILD_EXTRA_SYMBOLS := /home/madcat/Devel/KLGD/Module.symvers
 KBUILD_CFLAGS += -g3
 
 ifneq ($(KERNELRELEASE),)
-  	klgdffm-y := klgd_ff_plugin.o
-  	klgdffm-y += klgdff.o
-	obj-m += klgdffm.o
+	klgdffm-y := klgd_ff_plugin.o
+	klgdffm-y += klgdff.o
+	obj-m += klgd_ff_plugin.o klgdffm.o
 
 else
 	KERNELDIR ?= /lib/modules/$(shell uname -r)/build
