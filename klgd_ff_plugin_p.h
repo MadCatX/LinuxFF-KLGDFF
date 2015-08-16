@@ -67,7 +67,8 @@ struct klgd_plugin_private {
 	bool memless_constant;
 	bool memless_periodic;
 	bool memless_ramp;
-	u32 padding_caps:21;
+	bool timing_condition;
+	u32 padding_caps:20;
 	/* Device-wide state changes */
 	bool change_gain;
 	bool change_autocenter;
