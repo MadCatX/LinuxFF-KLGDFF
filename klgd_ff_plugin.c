@@ -24,7 +24,7 @@ static bool ffpl_process_memless(const struct klgd_plugin_private *priv, const s
 {
 	switch (eff->type) {
 	case FF_CONSTANT:
-		return priv->memless_mode;
+		return priv->memless_constant;
 	case FF_PERIODIC:
 		return priv->memless_periodic;
 	case FF_RAMP:
@@ -570,7 +570,7 @@ static int ffpl_playback_rq(struct input_dev *dev, int effect_id, int value)
 
 	eff->repeat = value;
 	if (value > 0) {
-		if (priv->control_timing && ffpl_process_memless(priv, &eff->active))
+		if (ffpl_process_memless(priv, &eff->latest))
 			ffpl_calculate_trip_times(eff, now);
 		else
 			eff->start_at = now; /* Start the effect right away and let the device deal with the timing */
@@ -614,8 +614,10 @@ static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struc
 			eff->change = FFPL_TO_UPDATE;
 			eff->trigger = FFPL_TRIG_UPDATE;
 		}
-	} else
+	} else {
 		eff->change = FFPL_TO_UPLOAD;
+		eff->trigger = FFPL_TRIG_NOW;
+	}
 
 	spin_unlock_irq(&dev->event_lock);
 	klgd_unlock_plugins_sched(self->plugins_lock);
@@ -902,7 +904,7 @@ static void ffpl_advance_trigger(const struct klgd_plugin_private *priv, struct 
 			eff->trigger = FFPL_TRIG_RECALC;
 			break;
 		}
-		if (eff->latest.replay.length && priv->control_timing && ffpl_process_memless(priv, &eff->latest))
+		if (eff->latest.replay.length && ffpl_process_memless(priv, &eff->latest))
 			eff->trigger = FFPL_TRIG_STOP;
 		else
 			eff->trigger = FFPL_TRIG_NONE;
@@ -913,14 +915,14 @@ static void ffpl_advance_trigger(const struct klgd_plugin_private *priv, struct 
 	case FFPL_TRIG_RECALC:
 		if (ffpl_needs_recalculation(priv, &eff->active, eff->start_at, eff->stop_at, now))
 			break;
-		if (eff->active.replay.length && priv->control_timing && ffpl_process_memless(priv, &eff->active)) {
+		if (eff->active.replay.length && ffpl_process_memless(priv, &eff->active)) {
 			eff->trigger = FFPL_TRIG_STOP;
 			break;
 		}
 		eff->trigger = FFPL_TRIG_NONE;
 		break;
 	case FFPL_TRIG_STOP:
-		if (eff->repeat > 0 && priv->control_timing && ffpl_process_memless(priv, &eff->active)) {
+		if (eff->repeat > 0 && ffpl_process_memless(priv, &eff->active)) {
 			eff->trigger = FFPL_TRIG_RESTART;
 			break;
 		}
@@ -1326,22 +1328,22 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 		priv->has_owr_to_srt = true;
 		printk("KLGDFF: Using REPLACE STARTED\n");
 	}
-	if (FFPL_MEMLESS_MODE & flags) {
-		priv->memless_mode = true;
-		priv->control_timing = true;
+
+	if ((FFPL_MEMLESS_CONSTANT | FFPL_MEMLESS_PERIODIC | FFPL_MEMLESS_RAMP) & flags) {
+		if (!test_bit(FF_CONSTANT - FF_EFFECT_MIN, &priv->supported_effects)) {
+			printk(KERN_ERR "The driver asked for memless mode but the device does not support FF_CONSTANT\n");
+			ret = -EINVAL;
+			goto err_out2;
+		}
 	}
-	if (FFPL_MEMLESS_PERIODIC & flags) {
-		priv->memless_mode = true;
+
+	if (FFPL_MEMLESS_CONSTANT & flags)
+		priv->memless_constant = true;
+	if (FFPL_MEMLESS_PERIODIC & flags)
 		priv->memless_periodic = true;
-		priv->control_timing = true;
-	}
-	if (FFPL_MEMLESS_RAMP & flags) {
-		priv->memless_mode = true;
+	if (FFPL_MEMLESS_RAMP & flags)
 		priv->memless_ramp = true;
-		priv->control_timing = true;
-	}
-	if (FFPL_CONTROL_TIMING & flags)
-	      priv->control_timing = true;
+
 	if (FFPL_HAS_NATIVE_GAIN & flags) {
 		priv->has_native_gain = true;
 		printk(KERN_NOTICE "KLGDFF: Using HAS_NATIVE_GAIN\n");

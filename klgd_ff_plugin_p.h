@@ -64,11 +64,10 @@ struct klgd_plugin_private {
 	bool has_owr_to_srt;
 	bool has_native_gain;
 	bool has_autocenter;
-	bool memless_mode;
+	bool memless_constant;
 	bool memless_periodic;
 	bool memless_ramp;
-	bool control_timing;
-	u32 padding_caps:20;
+	u32 padding_caps:21;
 	/* Device-wide state changes */
 	bool change_gain;
 	bool change_autocenter;
