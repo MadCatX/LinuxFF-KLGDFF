@@ -43,8 +43,6 @@ inline static bool ffpl_handle_timing(const struct klgd_plugin_private *priv, co
 		case FF_INERTIA:
 		case FF_SPRING:
 			return true;
-		default:
-			return false;
 		}
 	}
 
@@ -536,6 +534,7 @@ static void ffpl_calculate_trip_times(struct ffpl_effect *eff, const unsigned lo
 
 	eff->start_at = now + msecs_to_jiffies(ueff->replay.delay);
 	eff->updated_at = eff->start_at;
+	eff->touch_at = eff->start_at;
 
 	if (ueff->replay.delay)
 		printk(KERN_NOTICE "KLGDFF: Delayed effect will be started at %lu, now: %lu\n", eff->start_at, now);
@@ -699,6 +698,11 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		int ret;
 		struct ffpl_effect *eff = &priv->effects[idx];
+
+		if (time_before(now, eff->touch_at)) {
+			printk(KERN_NOTICE "KLGDFF: Combinable effect is to be processed at a later time, skipping\n");
+			continue;
+		}
 
 		if (eff->replace) {
 			/* Uncombinable effect is about to be replaced by a combinable one */
@@ -1002,6 +1006,12 @@ static int ffpl_get_commands(struct klgd_plugin *self, struct klgd_command_strea
 		struct ffpl_effect *eff = &priv->effects[idx];
 
 		printk(KERN_NOTICE "KLGDFF: Processing effect %lu\n", idx);
+
+		if (time_before(now, eff->touch_at)) {
+			printk(KERN_NOTICE "KLGDFF: Next change of the effect is schededuled for the future\n");
+			continue;
+		}
+
 		ret = ffpl_handle_state_change(priv, *s, eff, now);
 		/* TODO: Do something useful with the return code */
 		if (ret) {
@@ -1045,7 +1055,7 @@ static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long n
 			eff->change = FFPL_TO_START;
 			break;
 		case FFPL_TRIG_STOP:
-			/* Small processing delays might cause us to miss the precise stop point */
+			/* Small processing delays might make us to miss the precise stop point */
 			current_t = time_before(eff->stop_at, now) ? now : eff->stop_at;
 			eff->change = FFPL_TO_STOP;
 			eff->repeat--;
@@ -1057,6 +1067,8 @@ static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long n
 		default:
 			continue;
 		}
+
+		eff->touch_at = current_t;
 
 		if (!events++) {
 			printk(KERN_NOTICE "KLGDFF: First event\n");
