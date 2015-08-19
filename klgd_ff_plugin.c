@@ -341,6 +341,9 @@ static void ffpl_recalc_combined(struct klgd_plugin_private *priv, const unsigne
 		s32 _x;
 		s32 _y;
 
+		if (!ffpl_process_memless(priv, ueff))
+			continue;
+
 		if (eff->state != FFPL_STARTED)
 			continue;
 
