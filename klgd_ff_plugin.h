@@ -20,7 +20,6 @@
 #define FFPL_TIMING_CONDITION BIT(9)	 /* Let the plugin take care of starting and stopping of condition effects */
 
 #define FFPL_HAS_NATIVE_GAIN BIT(15)  /* Device can adjust the gain by itself */
-#define FFPL_HAS_AUTOCENTER BIT(16) /* Device supports autocentering */
 
 enum ffpl_control_command {
 	/* Force feedback state transitions */
