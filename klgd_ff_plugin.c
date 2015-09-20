@@ -384,6 +384,9 @@ static void ffpl_recalc_combined_cf(struct klgd_plugin_private *priv, const unsi
 		s32 _x;
 		s32 _y;
 
+		if (!ffpl_process_memless(priv, ueff))
+			continue;
+
 		if (eff->state != FFPL_STARTED)
 			continue;
 
@@ -1476,12 +1479,14 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 		priv->has_native_gain = true;
 		printk(KERN_NOTICE "KLGDFF: Using HAS_NATIVE_GAIN\n");
 	}
-	if (FFPL_HAS_AUTOCENTER & flags) {
+
+	if (FF_AUTOCENTER & priv->supported_effects) {
 		priv->has_autocenter = true;
-		set_bit(FF_AUTOCENTER, dev->ffbit);
+		input_set_capability(dev, EV_FF, FF_AUTOCENTER);
 		printk(KERN_NOTICE "KLGDFF: Using HAS_AUTOCENTER\n");
 	}
-	set_bit(FF_GAIN, dev->ffbit);
+
+	input_set_capability(dev, EV_FF, FF_GAIN);
 	for (idx = 0; idx <= (FF_WAVEFORM_MAX - FF_EFFECT_MIN); idx++) {
 		if (test_bit(idx, &priv->supported_effects)) {
 			printk(KERN_NOTICE "KLGDFF: Has bit %d, effect type %d\n", idx, FF_EFFECT_MIN + idx);
