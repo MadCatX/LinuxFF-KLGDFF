@@ -17,7 +17,10 @@
 					    Device must support FF_CONSTANT for this to work. */
 #define FFPL_MEMLESS_RAMP BIT(8)	 /* Device cannot process FF_RAMP by itself and requires KLGD-FF to calculate the overall force.
 					    Device must support FF_CONSTANT for this to work. */
-#define FFPL_TIMING_CONDITION BIT(9)	 /* Let the plugin take care of starting and stopping of condition effects */
+#define FFPL_MEMLESS_RUMBLE BIT(9)	 /* Device cannot process FF_RUMBLE by itself and requires KLGD-FF to calculate the overall force.
+					    Device must support FF_RUMBLE for this to work. */
+
+#define FFPL_TIMING_CONDITION BIT(10)	 /* Let the plugin take care of starting and stopping of condition effects */
 
 #define FFPL_HAS_NATIVE_GAIN BIT(15)  /* Device can adjust the gain by itself */
 #define FFPL_HAS_AUTOCENTER BIT(16) /* Device supports autocentering */

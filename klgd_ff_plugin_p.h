@@ -48,7 +48,8 @@ struct ffpl_effect {
 
 struct klgd_plugin_private {
 	struct ffpl_effect *effects;
-	struct ffpl_effect combined_effect;
+	struct ffpl_effect combined_effect_cf;
+	struct ffpl_effect combined_effect_rumble;
 	unsigned long supported_effects;
 	size_t effect_count;
 	struct input_dev *dev;
@@ -68,8 +69,9 @@ struct klgd_plugin_private {
 	bool memless_constant;
 	bool memless_periodic;
 	bool memless_ramp;
+	bool memless_rumble;
 	bool timing_condition;
-	u32 padding_caps:20;
+	u32 padding_caps:19;
 	/* Device-wide state changes */
 	bool change_gain;
 	bool change_autocenter;

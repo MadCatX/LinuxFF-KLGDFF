@@ -11,6 +11,47 @@ MODULE_DESCRIPTION("KLGD-FF Module");
 #define DIR_TO_DEGREES(dir) (360 - ((((dir > 0xc000) ? (u32)dir + 0x4000 - 0xffff : (u32)dir + 0x4000) * 360) / 0xffff))
 #define FRAC_16 15
 #define RECALC_DELTA_T_MSEC 20
+#define NEEDS_UPDATE_SET(etype, ffbit) \
+	do { \
+		switch (etype) { \
+		case FF_CONSTANT: \
+		case FF_RAMP: \
+			needs_update_cf = true; \
+			break; \
+		case FF_RUMBLE: \
+			needs_update_rumble = true; \
+			break; \
+		case FF_PERIODIC: \
+			if (test_bit(FF_CONSTANT, ffbit)) \
+				needs_update_cf = true; \
+			else \
+				needs_update_rumble = true; \
+			break; \
+		default: \
+			break; \
+		} \
+	} while (0);
+
+#define ACTIVE_EFFECTS_INC(etype, ffbit) \
+	do { \
+		switch (etype) { \
+		case FF_CONSTANT: \
+		case FF_RAMP: \
+			active_effects_cf++; \
+			break; \
+		case FF_RUMBLE: \
+			active_effects_rumble++; \
+			break; \
+		case FF_PERIODIC: \
+			if (test_bit(FF_CONSTANT, ffbit)) \
+				active_effects_cf++; \
+			else \
+				active_effects_rumble++; \
+			break; \
+		default: \
+			break; \
+		} \
+	} while (0);
 
 static int ffpl_handle_state_change(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff,
 				    const unsigned long now);
@@ -35,6 +76,8 @@ inline static bool ffpl_process_memless(const struct klgd_plugin_private *priv, 
 		return priv->memless_periodic;
 	case FF_RAMP:
 		return priv->memless_ramp;
+	case FF_RUMBLE:
+		return priv->memless_rumble;
 	default:
 		return false;
 	}
@@ -328,10 +371,10 @@ static void ffpl_ramp_to_x_y(struct ffpl_effect *eff, s32 *x, s32 *y, const unsi
 	ffpl_lvl_dir_to_x_y(new, ueff->direction, x, y);
 }
 
-static void ffpl_recalc_combined(struct klgd_plugin_private *priv, const unsigned long now)
+static void ffpl_recalc_combined_cf(struct klgd_plugin_private *priv, const unsigned long now, const bool handle_periodic)
 {
 	size_t idx;
-	struct ff_effect *cb_latest = &priv->combined_effect.latest;
+	struct ff_effect *cb_latest = &priv->combined_effect_cf.latest;
 	s32 x = 0;
 	s32 y = 0;
 
@@ -349,6 +392,8 @@ static void ffpl_recalc_combined(struct klgd_plugin_private *priv, const unsigne
 			ffpl_constant_to_x_y(eff, &_x, &_y, now);
 			break;
 		case FF_PERIODIC:
+			if (!handle_periodic)
+				break;
 			ffpl_periodic_to_x_y(eff, &_x, &_y, now);
 			break;
 		case FF_RAMP:
@@ -368,6 +413,26 @@ static void ffpl_recalc_combined(struct klgd_plugin_private *priv, const unsigne
 	cb_latest->type = FF_CONSTANT;
 	printk(KERN_NOTICE "KLGDFF: Resulting combined CF effect > x: %d, y: %d, level: %d, direction: %u\n", x, y, cb_latest->u.constant.level,
 	       cb_latest->direction);
+}
+
+static void ffpl_recalc_combined_rumble(struct klgd_plugin_private *priv, const unsigned long now, const bool handle_periodic)
+{
+	size_t idx;
+	struct ff_effect *cb_latest = &priv->combined_effect_rumble.latest;
+
+	for (idx = 0; idx < priv->effect_count; idx++) {
+		struct ffpl_effect *eff = &priv->effects[idx];
+		struct ff_effect *ueff = &eff->active;
+
+		switch (ueff->type) {
+		case FF_RUMBLE:
+			break;
+		case FF_PERIODIC:
+			if (!handle_periodic)
+				break;
+			break;
+		}
+	}
 }
 
 static int ffpl_erase_effect(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff)
@@ -698,8 +763,10 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 					  const unsigned long now)
 {
 	size_t idx;
-	bool needs_update = false;
-	size_t active_effects = 0;
+	bool needs_update_cf = false;
+	bool needs_update_rumble = false;
+	size_t active_effects_cf = 0;
+	size_t active_effects_rumble = 0;
 
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		int ret;
@@ -730,7 +797,7 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 			/* Combinable effect is being replaced by an uncombinable one */
 				printk(KERN_NOTICE "KLGDFF: Replacing combinable with uncombinable\n");
 				if (eff->state == FFPL_STARTED)
-					needs_update = true;
+					NEEDS_UPDATE_SET(eff->active.type, priv->dev->ffbit);
 				eff->state = FFPL_EMPTY;
 				eff->replace = false;
 				continue;
@@ -743,14 +810,14 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 		switch (eff->change) {
 		case FFPL_DONT_TOUCH:
 			if (eff->state == FFPL_STARTED) {
-				active_effects++;
+				ACTIVE_EFFECTS_INC(eff->active.type, priv->dev->ffbit);
 				if (eff->recalculate) {
-					needs_update = true;
+					NEEDS_UPDATE_SET(eff->active.type, priv->dev->ffbit);
 					eff->recalculate = false;
-					printk(KERN_NOTICE "KLGDFF: Recalculable combinable effect, total active effects %lu\n", active_effects);
+					printk(KERN_NOTICE "KLGDFF: Recalculable combinable effect, total active effects (CF/Rumble) %lu/%lu\n", active_effects_cf, active_effects_rumble);
 				}
 			} else
-				printk(KERN_NOTICE "KLGDFF: Unchanged combinable effect, total active effects %lu\n", active_effects);
+				printk(KERN_NOTICE "KLGDFF: Unchanged combinable effect, total active effects (CF/Rumble) %lu/%lu\n", active_effects_cf, active_effects_rumble);
 			break;
 		case FFPL_TO_START:
 			eff->state = FFPL_STARTED;
@@ -760,13 +827,14 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 				printk(KERN_NOTICE "KLGDFF: Updating a stopped combinable effect\n");
 				break;
 			}
-			active_effects++;
-			needs_update = true;
-			printk(KERN_NOTICE "KLGDFF: %s combinable effect, total active effects %lu\n", eff->change == FFPL_TO_START ? "Started" : "Altered", active_effects);
+			ACTIVE_EFFECTS_INC(eff->active.type, priv->dev->ffbit);
+			NEEDS_UPDATE_SET(eff->active.type, priv->dev->ffbit);
+			printk(KERN_NOTICE "KLGDFF: %s combinable effect, total active effects (CF/Rumble) %lu/%lu\n", eff->change == FFPL_TO_START ? "Started" : "Altered",
+			       active_effects_cf, active_effects_rumble);
 			break;
 		case FFPL_TO_STOP:
 			if (eff->state == FFPL_STARTED)
-				needs_update = true;
+				NEEDS_UPDATE_SET(eff->active.type, priv->dev->ffbit);
 		case FFPL_TO_UPLOAD:
 			eff->active = eff->latest;
 			eff->state = FFPL_UPLOADED;
@@ -774,9 +842,9 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 			break;
 		case FFPL_TO_ERASE:
 			if (eff->state == FFPL_STARTED)
-				needs_update = true;
+				NEEDS_UPDATE_SET(eff->active.type, priv->dev->ffbit);
 			eff->state = FFPL_EMPTY;
-			printk(KERN_NOTICE "KLGDFF: Stopped combinable effect, total active effects %lu\n", active_effects);
+			printk(KERN_NOTICE "KLGDFF: Stopped combinable effect, total active effects (CF/Rumble) %lu/%lu\n", active_effects_cf, active_effects_rumble);
 			break;
 		default:
 			printk(KERN_WARNING "KLGDFF: Unknown effect change!\n");
@@ -787,21 +855,37 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 	}
 
 	/* Combined effect needs recalculation */
-	if (needs_update) {
-		if (active_effects) {
-			printk(KERN_NOTICE "KLGDFF: Combined effect needs an update, total effects active: %lu\n", active_effects);
-			ffpl_recalc_combined(priv, now);
-			if (priv->combined_effect.state == FFPL_STARTED)
-				priv->combined_effect.change = FFPL_TO_UPDATE;
+	if (needs_update_cf) {
+		if (active_effects_cf) {
+			printk(KERN_NOTICE "KLGDFF: Combined constant force effect needs an update, total effects active: %lu\n", active_effects_cf);
+			ffpl_recalc_combined_cf(priv, now, test_bit(FF_CONSTANT, priv->dev->ffbit));
+			if (priv->combined_effect_cf.state == FFPL_STARTED)
+				priv->combined_effect_cf.change = FFPL_TO_UPDATE;
 			else
-				priv->combined_effect.change = FFPL_TO_START;
-
-			return 0;
+				priv->combined_effect_cf.change = FFPL_TO_START;
+		} else {
+			/* No combinable effects are active, remove the effect from device */
+			if (priv->combined_effect_cf.state != FFPL_EMPTY) {
+				printk(KERN_NOTICE "KLGDFF: No combinable constant force effects are active, erase the combined constant force effect from device\n");
+				priv->combined_effect_cf.change = FFPL_TO_ERASE;
+			}
 		}
-		/* No combinable effects are active, remove the effect from device */
-		if (priv->combined_effect.state != FFPL_EMPTY) {
-			printk(KERN_NOTICE "KLGDFF: No combinable effects are active, erase the combined effect from device\n");
-			priv->combined_effect.change = FFPL_TO_ERASE;
+	}
+
+	if (needs_update_rumble) {
+		if (active_effects_rumble) {
+			printk(KERN_NOTICE "KLGDFF: Combined rumble effect needs an update, total effects active: %lu\n", active_effects_rumble);
+			ffpl_recalc_combined_rumble(priv, now, test_bit(FF_CONSTANT, priv->dev->ffbit));
+			if (priv->combined_effect_rumble.state == FFPL_STARTED)
+				priv->combined_effect_rumble.change = FFPL_TO_UPDATE;
+			else
+				priv->combined_effect_rumble.change = FFPL_TO_START;
+		} else {
+			/* No combinable effects are active, remove the effect from device */
+			if (priv->combined_effect_rumble.state != FFPL_EMPTY) {
+				printk(KERN_NOTICE "KLGDFF: No combinable rumble effects are active, erase the combined effect from device\n");
+				priv->combined_effect_rumble.change = FFPL_TO_ERASE;
+			}
 		}
 	}
 
@@ -1002,9 +1086,9 @@ static int ffpl_get_commands(struct klgd_plugin *self, struct klgd_command_strea
 	}
 
 	/* Handle combined effect here */
-	ret = ffpl_handle_state_change(priv, *s, &priv->combined_effect, now);
+	ret = ffpl_handle_state_change(priv, *s, &priv->combined_effect_cf, now);
 	if (ret) {
-		printk(KERN_WARNING "KLGDFF: Cannot get command stream for combined effect\n");
+		printk(KERN_WARNING "KLGDFF: Cannot get command stream for combined constant force effect\n");
 		goto out;
 	}
 
@@ -1383,6 +1467,8 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 		priv->memless_periodic = true;
 	if (FFPL_MEMLESS_RAMP & flags)
 		priv->memless_ramp = true;
+	if (FFPL_MEMLESS_RUMBLE & flags)
+		priv->memless_rumble = true;
 	if (FFPL_TIMING_CONDITION & flags)
 		priv->timing_condition = true;
 
