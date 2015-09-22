@@ -403,7 +403,7 @@ static void ffpl_recalc_combined_cf(struct klgd_plugin_private *priv, const unsi
 			ffpl_ramp_to_x_y(eff, &_x, &_y, now);
 			break;
 		default:
-			printk(KERN_ERR "KLGDFF: Combinable effect handler tried to process an uncombinable effect! This should not happen!\n");
+			printk(KERN_ERR "KLGDFF: Combinable constant force effect handler tried to process an uncombinable effect! This should not happen!\n");
 			break;
 		}
 
@@ -418,10 +418,51 @@ static void ffpl_recalc_combined_cf(struct klgd_plugin_private *priv, const unsi
 	       cb_latest->direction);
 }
 
+static u16 ffpl_calculate_rumble_direction(const u32 total_mag, const u16 total_dir,
+					   const u32 new_mag, const u16 new_dir)
+{
+	if (!new_mag)
+		return total_dir;
+	if (!total_mag)
+		return new_dir;
+	return (((total_dir >> 1) * total_mag +
+		(new_dir >> 1) * new_mag) /
+		(total_mag + new_mag)) << 1;
+}
+
+static void ffpl_add_rumble(const struct ff_effect *ueff, u32 *strong_mag,
+			    u32 *weak_mag, u16 *dir)
+{
+	*dir += ffpl_calculate_rumble_direction(*strong_mag, *dir,
+					        ueff->u.rumble.strong_magnitude,
+					        ueff->direction);
+	*dir += ffpl_calculate_rumble_direction(*weak_mag, *dir,
+						ueff->u.rumble.weak_magnitude,
+						ueff->direction);
+}
+
+static void ffpl_add_emul_periodic(const struct ffpl_effect *eff,
+				   u32 *strong_mag, u32 *weak_mag,
+				   u16 *dir, const unsigned long now)
+{
+	const u32 level = abs(ffpl_apply_envelope(eff, now));
+
+	*dir = ffpl_calculate_rumble_direction(*strong_mag, *dir,
+					      level, eff->active.direction);
+	*dir = ffpl_calculate_rumble_direction(*weak_mag, *dir,
+					       level, eff->active.direction);
+
+	*strong_mag += level;
+	*weak_mag += level;
+}
+
 static void ffpl_recalc_combined_rumble(struct klgd_plugin_private *priv, const unsigned long now, const bool handle_periodic)
 {
 	size_t idx;
 	struct ff_effect *cb_latest = &priv->combined_effect_rumble.latest;
+	u32 strong_mag = 0;
+	u32 weak_mag = 0;
+	u16 dir = 0;
 
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		struct ffpl_effect *eff = &priv->effects[idx];
@@ -429,13 +470,25 @@ static void ffpl_recalc_combined_rumble(struct klgd_plugin_private *priv, const 
 
 		switch (ueff->type) {
 		case FF_RUMBLE:
+			ffpl_add_rumble(ueff, &strong_mag, &weak_mag, &dir);
 			break;
 		case FF_PERIODIC:
+			ffpl_add_emul_periodic(eff, &strong_mag, &weak_mag, &dir, now);
 			if (!handle_periodic)
 				break;
 			break;
+		default:
+			printk(KERN_ERR "KLGDFF: Combinable rumble effect handler tried to process an uncombinable effect! This should not happen!\n");
+			break;
 		}
 	}
+
+	cb_latest->direction = dir;
+	cb_latest->u.rumble.strong_magnitude = strong_mag;
+	cb_latest->u.rumble.weak_magnitude = weak_mag;
+	cb_latest->type = FF_RUMBLE;
+	printk(KERN_NOTICE "KLGDFF: Resulting combined rumble effect > strong: %u, weak: %u, direction: %u\n",
+	       cb_latest->u.rumble.strong_magnitude, cb_latest->u.rumble.weak_magnitude, cb_latest->direction);
 }
 
 static int ffpl_erase_effect(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff)
