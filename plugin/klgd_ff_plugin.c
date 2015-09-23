@@ -384,9 +384,6 @@ static void ffpl_recalc_combined_cf(struct klgd_plugin_private *priv, const unsi
 		s32 _x;
 		s32 _y;
 
-		if (!ffpl_process_memless(priv, ueff))
-			continue;
-
 		if (eff->state != FFPL_STARTED)
 			continue;
 
@@ -403,7 +400,7 @@ static void ffpl_recalc_combined_cf(struct klgd_plugin_private *priv, const unsi
 			ffpl_ramp_to_x_y(eff, &_x, &_y, now);
 			break;
 		default:
-			printk(KERN_ERR "KLGDFF: Combinable constant force effect handler tried to process an uncombinable effect! This should not happen!\n");
+			continue;
 			break;
 		}
 
@@ -468,6 +465,9 @@ static void ffpl_recalc_combined_rumble(struct klgd_plugin_private *priv, const 
 		struct ffpl_effect *eff = &priv->effects[idx];
 		struct ff_effect *ueff = &eff->active;
 
+		if (eff->state != FFPL_STARTED)
+			continue;
+
 		switch (ueff->type) {
 		case FF_RUMBLE:
 			ffpl_add_rumble(ueff, &strong_mag, &weak_mag, &dir);
@@ -478,7 +478,7 @@ static void ffpl_recalc_combined_rumble(struct klgd_plugin_private *priv, const 
 				break;
 			break;
 		default:
-			printk(KERN_ERR "KLGDFF: Combinable rumble effect handler tried to process an uncombinable effect! This should not happen!\n");
+			continue;
 			break;
 		}
 	}
@@ -1141,10 +1141,16 @@ static int ffpl_get_commands(struct klgd_plugin *self, struct klgd_command_strea
 		goto out;
 	}
 
-	/* Handle combined effect here */
+	/* Handle combined constant force effect here */
 	ret = ffpl_handle_state_change(priv, *s, &priv->combined_effect_cf, now);
 	if (ret) {
 		printk(KERN_WARNING "KLGDFF: Cannot get command stream for combined constant force effect\n");
+		goto out;
+	}
+
+	ret = ffpl_handle_state_change(priv, *s, &priv->combined_effect_rumble, now);
+	if (ret) {
+		printk(KERN_WARNING "KLGDFF: Cannot get command stream for combined rumble effect\n");
 		goto out;
 	}
 
