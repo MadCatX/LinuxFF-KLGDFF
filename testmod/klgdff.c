@@ -3,7 +3,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/sysfs.h>
-#include "klgd_ff_plugin.h"
+#include "../plugin/klgd_ff_plugin.h"
 
 #define EFFECT_COUNT 8
 

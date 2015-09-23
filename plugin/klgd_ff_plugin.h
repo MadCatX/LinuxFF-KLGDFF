@@ -1,5 +1,5 @@
 #include <linux/input.h>
-#include "../KLGD/klgd.h"
+#include "../../KLGD/klgd.h"
 
 #define FFPL_EFBIT(x) BIT(x - FF_EFFECT_MIN)
 
