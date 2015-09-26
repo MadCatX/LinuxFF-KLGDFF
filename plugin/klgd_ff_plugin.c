@@ -699,33 +699,73 @@ static int ffpl_erase_rq(struct input_dev *dev, int effect_id)
 	return 0;
 }
 
-/* Playback request coming from userspace */
+/*
+ * Playback request coming from userspace
+ *
+ * This function is called with dev->event_lock spinlock held
+ * so we cannot grab the plugins_lock mutex here directly.
+ *
+ * Instead we store the request in a FIFO queue and process it
+ * later from a workqueue.
+ *
+ */
 static int ffpl_playback_rq(struct input_dev *dev, int effect_id, int value)
 {
 	struct klgd_plugin *self = dev->ff->private;
 	struct klgd_plugin_private *priv = self->private;
-	struct ffpl_effect *eff = &priv->effects[effect_id];
-	const unsigned long now = jiffies;
+	struct ffpl_playback_task *t;
 
-	printk(KERN_NOTICE "KLGDFF: RQ %s\n", value ? "play" : "stop");
+	t = kzalloc(sizeof(*t), GFP_ATOMIC);
+	if (!t)
+		return -ENOMEM;
 
-	klgd_lock_plugins(self->plugins_lock);
-
-	eff->repeat = value;
-	if (value > 0) {
-		if (ffpl_handle_timing(priv, &eff->latest))
-			ffpl_calculate_trip_times(eff, now);
-		else
-			eff->start_at = now; /* Start the effect right away and let the device deal with the timing */
-		eff->trigger = FFPL_TRIG_START;
-	} else {
-		eff->change = FFPL_TO_STOP;
-		eff->trigger = FFPL_TRIG_NOW;
-	}
-
-	klgd_unlock_plugins_sched(self->plugins_lock);
+	t->value = value;
+	t->effect_id = effect_id;
+	list_add_tail(&t->pb_list, &priv->pb_list);
+	queue_work(priv->pbwq, &priv->pbwq_work);
 
 	return 0;
+}
+
+/*
+ * Here is where we process all playback requests.
+ * We take hold of the dev->event_lock spinlock to make
+ * sure that the queue is not modified while we are processing it.
+ * We always process the whole queue in one shot.
+ */
+static void ffpl_playback_rq_work(struct work_struct *w)
+{
+	unsigned long flags;
+	struct list_head *p, *n;
+	struct klgd_plugin_private *priv = container_of(w, struct klgd_plugin_private, pbwq_work);
+	struct klgd_plugin *self = priv->self;
+	const unsigned long now = jiffies;
+
+	klgd_lock_plugins(self->plugins_lock);
+	spin_lock_irqsave(&priv->dev->event_lock, flags);
+
+	list_for_each_safe(p, n, &priv->pb_list) {
+		struct ffpl_playback_task *t = list_entry(p, struct ffpl_playback_task, pb_list);
+		struct ffpl_effect *eff = &priv->effects[t->effect_id];
+
+		eff->repeat = t->value;
+		if (t->value > 0) {
+			if (ffpl_handle_timing(priv, &eff->latest))
+				ffpl_calculate_trip_times(eff, now);
+			else
+				eff->start_at = now; /* Start the effect right away and let the device deal with the timing */
+			eff->trigger = FFPL_TRIG_START;
+		} else {
+			eff->change = FFPL_TO_STOP;
+			eff->trigger = FFPL_TRIG_NOW;
+		}
+
+		list_del(p);
+		kfree(t);
+	}
+
+	spin_unlock_irqrestore(&priv->dev->event_lock, flags);
+	klgd_unlock_plugins_sched(self->plugins_lock);
 }
 
 /* Upload request coming from userspace */
@@ -812,6 +852,11 @@ out:
 
 static void ffpl_deinit(struct klgd_plugin *self)
 {
+	struct klgd_plugin_private *priv = self->private;
+
+	flush_workqueue(priv->pbwq);
+	destroy_workqueue(priv->pbwq);
+
 	printk(KERN_DEBUG "KLGDFF: Deinit complete\n");
 }
 
@@ -1484,8 +1529,16 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 	priv->control = control;
 	priv->user = user;
 	priv->gain = 0xFFFF;
+	priv->pbwq = create_singlethread_workqueue("ffpl_playback_rq_work");
+	if (!priv->pbwq) {
+		ret = -ENOMEM;
+		goto err_out2;
+	}
+	INIT_WORK(&priv->pbwq_work, ffpl_playback_rq_work);
+	INIT_LIST_HEAD(&priv->pb_list);
 
 	self->private = priv;
+	priv->self = self;
 	*plugin = self;
 
 	if (FFPL_HAS_EMP_TO_SRT & flags) {
@@ -1519,7 +1572,7 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 		if (!test_bit(FF_CONSTANT - FF_EFFECT_MIN, &priv->supported_effects)) {
 			printk(KERN_ERR "The driver asked for memless mode but the device does not support FF_CONSTANT\n");
 			ret = -EINVAL;
-			goto err_out2;
+			goto err_out3;
 		}
 	}
 
@@ -1555,6 +1608,8 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 
 	return 0;
 
+err_out3:
+	destroy_workqueue(priv->pbwq);
 err_out2:
 	kfree(priv);
 err_out1:

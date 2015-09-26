@@ -1,4 +1,6 @@
 #include "klgd_ff_plugin.h"
+#include <linux/list.h>
+#include <linux/workqueue.h>
 
 /* Possible state changes of an effect */
 enum ffpl_st_change {
@@ -46,13 +48,25 @@ struct ffpl_effect {
 	bool recalculate;		/* Effect shall be recalculated in the respective processing loop */
 };
 
+struct ffpl_playback_task {
+	int effect_id;
+	int value;
+	struct list_head pb_list;
+};
+
 struct klgd_plugin_private {
+	struct klgd_plugin *self;
 	struct ffpl_effect *effects;
 	struct ffpl_effect combined_effect_cf;
 	struct ffpl_effect combined_effect_rumble;
 	unsigned long supported_effects;
 	size_t effect_count;
 	struct input_dev *dev;
+
+	struct workqueue_struct *pbwq;
+	struct work_struct pbwq_work;
+	struct list_head pb_list;
+
 	int (*control)(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data, void *user);
 	void *user;
 	u16 gain;

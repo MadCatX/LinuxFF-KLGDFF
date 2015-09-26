@@ -364,9 +364,9 @@ static int __init klgdff_init(void)
 	input_set_capability(dev, EV_ABS, ABS_Y);
 	input_set_capability(dev, EV_KEY, BTN_0);
 	input_set_capability(dev, EV_KEY, BTN_TRIGGER);
+	input_set_capability(dev, EV_FF, FF_AUTOCENTER);
 	input_set_abs_params(dev, ABS_X, -0x7fff, 0x7fff, 0, 0);
 	input_set_abs_params(dev, ABS_Y, -0x7fff, 0x7fff, 0, 0);
-	set_bit(FF_AUTOCENTER, &ffbits);
 
 	ret = ffpl_init_plugin(&ff_plugin, dev, EFFECT_COUNT, ffbits,
 			       FFPL_HAS_EMP_TO_SRT | FFPL_REPLACE_STARTED |
