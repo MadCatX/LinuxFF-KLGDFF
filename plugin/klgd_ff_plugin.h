@@ -3,6 +3,35 @@
 
 #define FFPL_EFBIT(x) BIT(x - FF_EFFECT_MIN)
 
+/*
+ * Preserving full direction for FF_RUMBLE effects is not necessary
+ * since the rumble motors can effectively spin in only two directions.
+ * The information about direction of rumble effects is reduced to
+ * up, down, left and right. These values are stored as individual
+ * bits in the effect.direction field as follows:
+ *
+ * BIT 0: 0 => Strong magnitude is turning left
+ * BIT 0: 1 => Strong magnitude is turning right
+ * BIT 1: 0 => Strong magnitude is turning down
+ * BIT 1: 1 => Strong magnitide is turning up
+ * BIT 2: 0 => Weak magnitude is turning left
+ * BIT 2: 1 => Weak magnitude is turning right
+ * BIT 3: 0 => Weak magnitude is turning down
+ * BIT 3: 1 => Weak magnitide is turning up
+ *
+ * The scheme above stores directions for both strong and weak magnitude
+ * in terms of quadrants. This is necessary when effect combining is used
+ * and multiple effects are squashed together into one overall effect.
+ *
+ * Note that the scheme above is used ONLY when combining of rumble effects
+ * is active. "Uncombined" rumble effects retain full information about
+ * their direction.
+ */
+#define FFPL_RUMBLE_STRONG_RIGHT BIT(0)
+#define FFPL_RUMBLE_STRONG_UP BIT(1)
+#define FFPL_RUMBLE_WEAK_RIGHT BIT(2)
+#define FFPL_RUMBLE_WEAK_UP BIT(3)
+
 /* Allowed flag bits */
 #define FFPL_HAS_EMP_TO_SRT BIT(0) /* Device supports direct "upload and start" */
 #define FFPL_HAS_SRT_TO_EMP BIT(1) /* Device supports direct "stop and erase" */
@@ -23,6 +52,7 @@
 #define FFPL_TIMING_CONDITION BIT(10)	 /* Let the plugin take care of starting and stopping of condition effects */
 
 #define FFPL_HAS_NATIVE_GAIN BIT(15)  /* Device can adjust the gain by itself */
+
 
 enum ffpl_control_command {
 	/* Force feedback state transitions */

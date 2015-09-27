@@ -415,80 +415,79 @@ static void ffpl_recalc_combined_cf(struct klgd_plugin_private *priv, const unsi
 	       cb_latest->direction);
 }
 
-static u16 ffpl_calculate_rumble_direction(const u32 total_mag, const u16 total_dir,
-					   const u32 new_mag, const u16 new_dir)
+static u16 ffpl_set_rumble_direction(const u16 strong_dir, const u16 weak_dir)
 {
-	if (!new_mag)
-		return total_dir;
-	if (!total_mag)
-		return new_dir;
-	return (((total_dir >> 1) * total_mag +
-		(new_dir >> 1) * new_mag) /
-		(total_mag + new_mag)) << 1;
-}
+	u16 dir = 0;
 
-static void ffpl_add_rumble(const struct ff_effect *ueff, u32 *strong_mag,
-			    u32 *weak_mag, u16 *dir)
-{
-	*dir += ffpl_calculate_rumble_direction(*strong_mag, *dir,
-					        ueff->u.rumble.strong_magnitude,
-					        ueff->direction);
-	*dir += ffpl_calculate_rumble_direction(*weak_mag, *dir,
-						ueff->u.rumble.weak_magnitude,
-						ueff->direction);
-}
+	if (strong_dir >= 0x8000)
+		dir |= FFPL_RUMBLE_STRONG_RIGHT;
+	if (weak_dir >= 0x8000)
+		dir |= FFPL_RUMBLE_WEAK_RIGHT;
+	if (strong_dir >= 0x4000 && strong_dir < 0xc000)
+		dir |= FFPL_RUMBLE_STRONG_UP;
+	if (weak_dir >= 0x4000 && weak_dir < 0xc000)
+		dir |= FFPL_RUMBLE_WEAK_UP;
 
-static void ffpl_add_emul_periodic(const struct ffpl_effect *eff,
-				   u32 *strong_mag, u32 *weak_mag,
-				   u16 *dir, const unsigned long now)
-{
-	const u32 level = abs(ffpl_apply_envelope(eff, now));
-
-	*dir = ffpl_calculate_rumble_direction(*strong_mag, *dir,
-					      level, eff->active.direction);
-	*dir = ffpl_calculate_rumble_direction(*weak_mag, *dir,
-					       level, eff->active.direction);
-
-	*strong_mag += level;
-	*weak_mag += level;
+	return dir;
 }
 
 static void ffpl_recalc_combined_rumble(struct klgd_plugin_private *priv, const unsigned long now, const bool handle_periodic)
 {
 	size_t idx;
 	struct ff_effect *cb_latest = &priv->combined_effect_rumble.latest;
-	u32 strong_mag = 0;
-	u32 weak_mag = 0;
-	u16 dir = 0;
+	s32 strong_x = 0;
+	s32 strong_y = 0;
+	s32 weak_x = 0;
+	s32 weak_y = 0;
+	/* Resulting overall values expressed as direction and magnitude */
+	s16 strong_mag;
+	u16 strong_dir;
+	s16 weak_mag;
+	u16 weak_dir;
 
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		struct ffpl_effect *eff = &priv->effects[idx];
 		struct ff_effect *ueff = &eff->active;
+		s32 _strong_x;
+		s32 _strong_y;
+		s32 _weak_x;
+		s32 _weak_y;
 
 		if (eff->state != FFPL_STARTED)
 			continue;
 
 		switch (ueff->type) {
 		case FF_RUMBLE:
-			ffpl_add_rumble(ueff, &strong_mag, &weak_mag, &dir);
+			ffpl_lvl_dir_to_x_y(ueff->u.rumble.strong_magnitude / 2, ueff->direction, &_strong_x, &_strong_y);
+			ffpl_lvl_dir_to_x_y(ueff->u.rumble.weak_magnitude / 2, ueff->direction, &_weak_x, &_weak_y);
 			break;
 		case FF_PERIODIC:
-			ffpl_add_emul_periodic(eff, &strong_mag, &weak_mag, &dir, now);
+		{
+			u32 new_level;
 			if (!handle_periodic)
 				break;
+
+			new_level = abs(ffpl_apply_envelope(eff, now));
+			ffpl_lvl_dir_to_x_y(new_level, ueff->direction, &_strong_x, &_strong_y);
+			ffpl_lvl_dir_to_x_y(new_level, ueff->direction, &_weak_x, &_weak_y);
 			break;
+		}
 		default:
 			continue;
 			break;
 		}
+		strong_x += _strong_x;
+		strong_y += _strong_y;
+		weak_x += _weak_x;
+		weak_y += _weak_y;
 	}
 
-	cb_latest->direction = dir;
-	cb_latest->u.rumble.strong_magnitude = strong_mag;
-	cb_latest->u.rumble.weak_magnitude = weak_mag;
+	ffpl_x_y_to_lvl_dir(strong_x, strong_y, &strong_mag, &strong_dir);
+	ffpl_x_y_to_lvl_dir(weak_x, weak_y, &weak_mag, &weak_dir);
+	cb_latest->direction = ffpl_set_rumble_direction(strong_dir, weak_dir);
+	cb_latest->u.rumble.strong_magnitude = (u16)strong_mag * 2;
+	cb_latest->u.rumble.weak_magnitude = (u16)weak_mag * 2;
 	cb_latest->type = FF_RUMBLE;
-	printk(KERN_NOTICE "KLGDFF: Resulting combined rumble effect > strong: %u, weak: %u, direction: %u\n",
-	       cb_latest->u.rumble.strong_magnitude, cb_latest->u.rumble.weak_magnitude, cb_latest->direction);
 }
 
 static int ffpl_erase_effect(struct klgd_plugin_private *priv, struct klgd_command_stream *s, struct ffpl_effect *eff)

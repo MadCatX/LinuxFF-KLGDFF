@@ -16,6 +16,35 @@ static u16 gain;
 static u16 autocenter;
 static u32 test_user = 0xC001CAFE;
 
+static char *klgdff_combined_rumble_dir(const u16 dir)
+{
+	static char dir_str[32];
+
+	dir_str[0] = '\0';
+
+	strcat(dir_str, "STRONG: ");
+	if (dir & FFPL_RUMBLE_STRONG_UP)
+		strcat(dir_str, "Up ");
+	else
+		strcat(dir_str, "Down ");
+	if (dir & FFPL_RUMBLE_STRONG_RIGHT)
+		strcat(dir_str, "Right ");
+	else
+		strcat(dir_str, "Left ");
+
+	strcat(dir_str, "WEAK: ");
+	if (dir & FFPL_RUMBLE_WEAK_UP)
+		strcat(dir_str, "Up ");
+	else
+		strcat(dir_str, "Down ");
+	if (dir & FFPL_RUMBLE_WEAK_RIGHT)
+		strcat(dir_str, "Right ");
+	else
+		strcat(dir_str, "Left ");
+
+	return dir_str;
+}
+
 static int klgdff_erase(struct klgd_command_stream *s, const struct ff_effect *effect)
 {
 	char *text = kasprintf(GFP_KERNEL, "Erasing effect, type %d, id %d", effect->type, effect->id);
@@ -123,8 +152,8 @@ static int klgdff_start(struct klgd_command_stream *s, const struct ff_effect *e
 		break;
 	}
 	case FF_RUMBLE:
-		text = kasprintf(GFP_KERNEL, "Playing FF_RUMBLE, strong: %u, weak: %u, direction: %u\n", effect->u.rumble.strong_magnitude,
-				 effect->u.rumble.weak_magnitude, effect->direction);
+		text = kasprintf(GFP_KERNEL, "Playing FF_RUMBLE, strong: %u, weak: %u, direction: %s\n", effect->u.rumble.strong_magnitude,
+				 effect->u.rumble.weak_magnitude, klgdff_combined_rumble_dir(effect->direction));
 		break;
 	default:
 		text = kasprintf(GFP_KERNEL, "Playing effect, type %d, id %d, repeat %d", effect->type, effect->id, repeat);
@@ -174,8 +203,8 @@ static int klgdff_update(struct klgd_command_stream *s, const struct ff_effect *
 		break;
 	}
 	case FF_RUMBLE:
-		text = kasprintf(GFP_KERNEL, "Updating FF_RUMBLE, strong: %u, weak: %u, direction: %u\n", effect->u.rumble.strong_magnitude,
-				 effect->u.rumble.weak_magnitude, effect->direction);
+		text = kasprintf(GFP_KERNEL, "Updating FF_RUMBLE, strong: %u, weak: %u, direction: %s\n", effect->u.rumble.strong_magnitude,
+				 effect->u.rumble.weak_magnitude, klgdff_combined_rumble_dir(effect->direction));
 		break;
 	default:
 		text = kasprintf(GFP_KERNEL, "Updating, type %d, id %d", effect->type, effect->id);
@@ -225,8 +254,8 @@ static int klgdff_up_start(struct klgd_command_stream *s, const struct ff_effect
 		break;
 	}
 	case FF_RUMBLE:
-		text = kasprintf(GFP_KERNEL, "Uploading and starting FF_RUMBLE, strong: %u, weak: %u, direction: %u\n", effect->u.rumble.strong_magnitude,
-				 effect->u.rumble.weak_magnitude, effect->direction);
+		text = kasprintf(GFP_KERNEL, "Uploading and starting FF_RUMBLE, strong: %u, weak: %u, direction: %s\n", effect->u.rumble.strong_magnitude,
+				 effect->u.rumble.weak_magnitude, klgdff_combined_rumble_dir(effect->direction));
 		break;
 	default:
 		text = kasprintf(GFP_KERNEL, "Uploading and starting effect, type %d, id %d, repeat %d", effect->type, effect->id, repeat);
