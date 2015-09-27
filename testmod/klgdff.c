@@ -145,7 +145,7 @@ static int klgdff_start(struct klgd_command_stream *s, const struct ff_effect *e
 	{
 		s32 x;
 		s32 y;
-		s16 level = effect->u.constant.level * gain / 0xFFFF;
+		s32 level = effect->u.constant.level * gain / 0xFFFF;
 
 		ffpl_lvl_dir_to_x_y(level, effect->direction, &x, &y);
 		text = kasprintf(GFP_KERNEL, "Playing FF_CONSTANT, level: %d, dir: %u, X: %d, Y: %d", level, effect->direction, x, y);
@@ -196,7 +196,7 @@ static int klgdff_update(struct klgd_command_stream *s, const struct ff_effect *
 	{
 		s32 x;
 		s32 y;
-		s16 level = effect->u.constant.level * gain / 0xFFFF;
+		s32 level = effect->u.constant.level * gain / 0xFFFF;
 
 		ffpl_lvl_dir_to_x_y(level, effect->direction, &x, &y);
 		text = kasprintf(GFP_KERNEL, "Updating FF_CONSTANT, level: %d, dir: %u, X: %d, Y: %d", level, effect->direction, x, y);
@@ -247,7 +247,7 @@ static int klgdff_up_start(struct klgd_command_stream *s, const struct ff_effect
 	{
 		s32 x;
 		s32 y;
-		s16 level = effect->u.constant.level * gain / 0xFFFF;
+		s32 level = effect->u.constant.level * gain / 0xFFFF;
 
 		ffpl_lvl_dir_to_x_y(level, effect->direction, &x, &y);
 		text = kasprintf(GFP_KERNEL, "Uploading and starting FF_CONSTANT, level: %d, dir: %u, X: %d, Y: %d", level, effect->direction, x, y);
