@@ -975,7 +975,7 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 	if (needs_update_rumble) {
 		if (active_effects_rumble) {
 			printk(KERN_NOTICE "KLGDFF: Combined rumble effect needs an update, total effects active: %lu\n", active_effects_rumble);
-			ffpl_recalc_combined_rumble(priv, now, test_bit(FF_CONSTANT, priv->dev->ffbit));
+			ffpl_recalc_combined_rumble(priv, now, !test_bit(FF_CONSTANT, priv->dev->ffbit));
 			if (priv->combined_effect_rumble.state == FFPL_STARTED)
 				priv->combined_effect_rumble.change = FFPL_TO_UPDATE;
 			else
@@ -1567,7 +1567,11 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 		printk("KLGDFF: Using REPLACE STARTED\n");
 	}
 
-	if ((FFPL_MEMLESS_CONSTANT | FFPL_MEMLESS_PERIODIC | FFPL_MEMLESS_RAMP) & flags) {
+	if ((FFPL_MEMLESS_RUMBLE & flags) && !test_bit(FF_CONSTANT - FF_EFFECT_MIN, &priv->supported_effects)) {
+		priv->memless_periodic = true;
+		printk(KERN_NOTICE "KLGDFF: Emulating PERIODIC through RUMBLE\n");
+	}
+	else if ((FFPL_MEMLESS_CONSTANT | FFPL_MEMLESS_PERIODIC | FFPL_MEMLESS_RAMP) & flags) {
 		if (!test_bit(FF_CONSTANT - FF_EFFECT_MIN, &priv->supported_effects)) {
 			printk(KERN_ERR "The driver asked for memless mode but the device does not support FF_CONSTANT\n");
 			ret = -EINVAL;
