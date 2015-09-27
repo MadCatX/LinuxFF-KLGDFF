@@ -1,8 +1,6 @@
 #include <linux/input.h>
 #include "../../KLGD/klgd.h"
 
-#define FFPL_EFBIT(x) BIT(x - FF_EFFECT_MIN)
-
 /*
  * Preserving full direction for FF_RUMBLE effects is not necessary
  * since the rumble motors can effectively spin in only two directions.
@@ -85,7 +83,6 @@ union ffpl_control_data {
 
 void ffpl_lvl_dir_to_x_y(const s32 level, const u16 direction, s32 *x, s32 *y);
 int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const size_t effect_count,
-		     const unsigned long supported_effects,
 		     const unsigned long flags,
 		     int (*control)(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data, void *user),
 		     void *user);

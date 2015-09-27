@@ -1487,7 +1487,6 @@ static int ffpl_init(struct klgd_plugin *self)
 
 /* Initialize the plugin */
 int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const size_t effect_count,
-		     const unsigned long supported_effects,
 		     const unsigned long flags,
 		     int (*control)(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data, void *user),
 		     void *user)
@@ -1522,7 +1521,6 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 	self->get_commands = ffpl_get_commands;
 	self->get_update_time = ffpl_get_update_time;
 	self->init = ffpl_init;
-	priv->supported_effects = supported_effects;
 	priv->effect_count = effect_count;
 	priv->dev = dev;
 	priv->control = control;
@@ -1567,12 +1565,12 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 		printk("KLGDFF: Using REPLACE STARTED\n");
 	}
 
-	if ((FFPL_MEMLESS_RUMBLE & flags) && !test_bit(FF_CONSTANT - FF_EFFECT_MIN, &priv->supported_effects)) {
+	if ((FFPL_MEMLESS_RUMBLE & flags) && !test_bit(FF_CONSTANT, dev->ffbit)) {
 		priv->memless_periodic = true;
 		printk(KERN_NOTICE "KLGDFF: Emulating PERIODIC through RUMBLE\n");
 	}
 	else if ((FFPL_MEMLESS_CONSTANT | FFPL_MEMLESS_PERIODIC | FFPL_MEMLESS_RAMP) & flags) {
-		if (!test_bit(FF_CONSTANT - FF_EFFECT_MIN, &priv->supported_effects)) {
+		if (!test_bit(FF_CONSTANT, dev->ffbit)) {
 			printk(KERN_ERR "The driver asked for memless mode but the device does not support FF_CONSTANT\n");
 			ret = -EINVAL;
 			goto err_out3;
@@ -1594,20 +1592,7 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 		priv->has_native_gain = true;
 		printk(KERN_NOTICE "KLGDFF: Using HAS_NATIVE_GAIN\n");
 	}
-
-	if (FF_AUTOCENTER & priv->supported_effects) {
-		priv->has_autocenter = true;
-		input_set_capability(dev, EV_FF, FF_AUTOCENTER);
-		printk(KERN_NOTICE "KLGDFF: Using HAS_AUTOCENTER\n");
-	}
-
 	input_set_capability(dev, EV_FF, FF_GAIN);
-	for (idx = 0; idx <= (FF_WAVEFORM_MAX - FF_EFFECT_MIN); idx++) {
-		if (test_bit(idx, &priv->supported_effects)) {
-			printk(KERN_NOTICE "KLGDFF: Has bit %d, effect type %d\n", idx, FF_EFFECT_MIN + idx);
-			input_set_capability(dev, EV_FF, idx + FF_EFFECT_MIN);
-		}
-	}
 
 	return 0;
 

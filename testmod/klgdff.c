@@ -351,16 +351,6 @@ static void __exit klgdff_exit(void)
 
 static int __init klgdff_init(void)
 {
-	unsigned long ffbits = FFPL_EFBIT(FF_CONSTANT) |
-			       FFPL_EFBIT(FF_RUMBLE) |
-			       FFPL_EFBIT(FF_PERIODIC) | FFPL_EFBIT(FF_SINE)
-						       | FFPL_EFBIT(FF_SQUARE)
-						       | FFPL_EFBIT(FF_SAW_UP)
-						       | FFPL_EFBIT(FF_SAW_DOWN)
-						       | FFPL_EFBIT(FF_TRIANGLE) |
-			       FFPL_EFBIT(FF_RAMP) |
-			       FFPL_EFBIT(FF_SPRING);
-
 	int ret;
 
 	klgdff_obj = kobject_create_and_add("klgdff_obj", kernel_kobj);
@@ -389,6 +379,17 @@ static int __init klgdff_init(void)
 	dev->dev.parent = NULL;
 	gain = 0xFFFF;
 
+	input_set_capability(dev, EV_FF, FF_CONSTANT);
+	input_set_capability(dev, EV_FF, FF_RUMBLE);
+	input_set_capability(dev, EV_FF, FF_PERIODIC);
+		input_set_capability(dev, EV_FF, FF_SINE);
+		input_set_capability(dev, EV_FF, FF_SQUARE);
+		input_set_capability(dev, EV_FF, FF_SAW_UP);
+		input_set_capability(dev, EV_FF, FF_SAW_DOWN);
+		input_set_capability(dev, EV_FF, FF_TRIANGLE);
+	input_set_capability(dev, EV_FF, FF_RAMP);
+	input_set_capability(dev, EV_FF, FF_SPRING);
+
 	input_set_capability(dev, EV_ABS, ABS_X);
 	input_set_capability(dev, EV_ABS, ABS_Y);
 	input_set_capability(dev, EV_KEY, BTN_0);
@@ -397,7 +398,7 @@ static int __init klgdff_init(void)
 	input_set_abs_params(dev, ABS_X, -0x7fff, 0x7fff, 0, 0);
 	input_set_abs_params(dev, ABS_Y, -0x7fff, 0x7fff, 0, 0);
 
-	ret = ffpl_init_plugin(&ff_plugin, dev, EFFECT_COUNT, ffbits,
+	ret = ffpl_init_plugin(&ff_plugin, dev, EFFECT_COUNT,
 			       FFPL_HAS_EMP_TO_SRT | FFPL_REPLACE_STARTED |
 			       FFPL_MEMLESS_CONSTANT | FFPL_MEMLESS_RUMBLE | FFPL_TIMING_CONDITION,
 			       klgdff_control, &test_user);
