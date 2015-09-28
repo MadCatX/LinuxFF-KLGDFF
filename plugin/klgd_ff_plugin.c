@@ -8,7 +8,6 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Michal \"MadCatX\" Maly");
 MODULE_DESCRIPTION("KLGD-FF Module");
 
-//#define DIR_TO_DEGREES(dir) (360 - ((((dir > 0xc000) ? (u32)dir + 0x4000 - 0xffff : (u32)dir + 0x4000) * 360) / 0xffff))
 #define FRAC_16 15
 #define RECALC_DELTA_T_MSEC 20
 #define NEEDS_UPDATE_SET(etype, ffbit) \
