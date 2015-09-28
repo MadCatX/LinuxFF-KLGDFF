@@ -8,7 +8,7 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Michal \"MadCatX\" Maly");
 MODULE_DESCRIPTION("KLGD-FF Module");
 
-#define DIR_TO_DEGREES(dir) (360 - ((((dir > 0xc000) ? (u32)dir + 0x4000 - 0xffff : (u32)dir + 0x4000) * 360) / 0xffff))
+//#define DIR_TO_DEGREES(dir) (360 - ((((dir > 0xc000) ? (u32)dir + 0x4000 - 0xffff : (u32)dir + 0x4000) * 360) / 0xffff))
 #define FRAC_16 15
 #define RECALC_DELTA_T_MSEC 20
 #define NEEDS_UPDATE_SET(etype, ffbit) \
@@ -59,11 +59,11 @@ static bool ffpl_needs_replacing(const struct ff_effect *ac_eff, const struct ff
 
 void ffpl_lvl_dir_to_x_y(const s32 level, const u16 direction, s32 *x, s32 *y)
 {
-	const int degrees = DIR_TO_DEGREES(direction);
+	const int degrees = direction * 360 / 0xFFFF;
 
 	printk(KERN_NOTICE "KLGDFF: DIR_TO_DEGREES > Dir: %u, Deg: %u\n", direction, degrees);
-	*x = (level * fixp_cos16(degrees)) >> FRAC_16;
-	*y = (level * fixp_sin16(degrees)) >> FRAC_16;
+	*x = (level * -fixp_sin16(degrees)) >> FRAC_16;
+	*y = (level * -fixp_cos16(degrees)) >> FRAC_16;
 }
 EXPORT_SYMBOL_GPL(ffpl_lvl_dir_to_x_y);
 
