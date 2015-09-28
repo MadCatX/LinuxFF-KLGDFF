@@ -10,7 +10,13 @@ MODULE_DESCRIPTION("KLGD-FF Module");
 
 #define FRAC_16 15
 #define RECALC_DELTA_T_MSEC 20
-#define NEEDS_UPDATE_SET(etype, ffbit) \
+
+/* Combining handlers */
+#define FFPL_HANDLER_CF BIT(0)
+#define FFPL_HANDLER_RUMBLE BIT(1)
+#define FFPL_HANDLER_ANY (BIT(0) | BIT(1))
+/* Macros to set which combining handlers have to be called */
+#define NEEDS_UPDATE_SET(etype) \
 	do { \
 		switch (etype) { \
 		case FF_CONSTANT: \
@@ -18,20 +24,23 @@ MODULE_DESCRIPTION("KLGD-FF Module");
 			needs_update_cf = true; \
 			break; \
 		case FF_RUMBLE: \
-			needs_update_rumble = true; \
-			break; \
-		case FF_PERIODIC: \
-			if (test_bit(FF_CONSTANT, ffbit)) \
+			if (priv->memless_rumble_emul) \
 				needs_update_cf = true; \
 			else \
 				needs_update_rumble = true; \
+			break; \
+		case FF_PERIODIC: \
+			if (priv->memless_periodic_emul) \
+				needs_update_rumble = true; \
+			else \
+				needs_update_cf = true; \
 			break; \
 		default: \
 			break; \
 		} \
 	} while (0);
 
-#define ACTIVE_EFFECTS_INC(etype, ffbit) \
+#define ACTIVE_EFFECTS_INC(etype) \
 	do { \
 		switch (etype) { \
 		case FF_CONSTANT: \
@@ -39,13 +48,16 @@ MODULE_DESCRIPTION("KLGD-FF Module");
 			active_effects_cf++; \
 			break; \
 		case FF_RUMBLE: \
-			active_effects_rumble++; \
-			break; \
-		case FF_PERIODIC: \
-			if (test_bit(FF_CONSTANT, ffbit)) \
+			if (priv->memless_rumble_emul) \
 				active_effects_cf++; \
 			else \
 				active_effects_rumble++; \
+			break; \
+		case FF_PERIODIC: \
+			if (priv->memless_periodic_emul) \
+				active_effects_rumble++; \
+			else \
+				active_effects_cf++; \
 			break; \
 		default: \
 			break; \
@@ -66,20 +78,33 @@ void ffpl_lvl_dir_to_x_y(const s32 level, const u16 direction, s32 *x, s32 *y)
 }
 EXPORT_SYMBOL_GPL(ffpl_lvl_dir_to_x_y);
 
-inline static bool ffpl_process_memless(const struct klgd_plugin_private *priv, const struct ff_effect *eff)
+inline static bool ffpl_process_memless(const struct klgd_plugin_private *priv, const struct ff_effect *eff,
+					const int handler)
 {
+	bool ret = false;
+
 	switch (eff->type) {
 	case FF_CONSTANT:
 		return priv->memless_constant;
 	case FF_PERIODIC:
-		return priv->memless_periodic;
+		if (FFPL_HANDLER_CF & handler)
+			ret |= priv->memless_periodic;
+		if (FFPL_HANDLER_RUMBLE & handler)
+			ret |= priv->memless_periodic_emul;
+		break;
 	case FF_RAMP:
 		return priv->memless_ramp;
 	case FF_RUMBLE:
-		return priv->memless_rumble;
+		if (FFPL_HANDLER_CF & handler)
+			ret |= priv->memless_rumble_emul;
+		if (FFPL_HANDLER_RUMBLE & handler)
+			ret |= priv->memless_rumble;
+		break;
 	default:
 		return false;
 	}
+
+	return ret;
 }
 
 inline static bool ffpl_handle_timing(const struct klgd_plugin_private *priv, const struct ff_effect *eff)
@@ -94,7 +119,7 @@ inline static bool ffpl_handle_timing(const struct klgd_plugin_private *priv, co
 		}
 	}
 
-	return ffpl_process_memless(priv, eff);
+	return ffpl_process_memless(priv, eff, FFPL_HANDLER_ANY);
 }
 
 static const struct ff_envelope * ffpl_get_envelope(const struct ff_effect *ueff)
@@ -370,7 +395,38 @@ static void ffpl_ramp_to_x_y(struct ffpl_effect *eff, s32 *x, s32 *y, const unsi
 	ffpl_lvl_dir_to_x_y(new, ueff->direction, x, y);
 }
 
-static void ffpl_recalc_combined_cf(struct klgd_plugin_private *priv, const unsigned long now, const bool handle_periodic)
+/*
+ * Emulate FF_RUMBLE effects through FF_CONSTANT
+ */
+static void ffpl_rumble_to_x_y(struct ffpl_effect *eff, s32 *x, s32 *y, const unsigned long now)
+{
+	bool direction_up;
+	bool direction_left;
+	const unsigned long update_rate = msecs_to_jiffies(RECALC_DELTA_T_MSEC);
+	const struct ff_effect *ueff = &eff->active;
+	const u16 strong = ueff->u.rumble.strong_magnitude;
+	const u16 weak = ueff->u.rumble.weak_magnitude;
+	/* To calculate 't', we pretend that mlnxeff->begin_at == 0, thus t == now.  */
+	/* This will synchronise all simultaneously playing emul rumble effects,     */
+	/* otherwise non-deterministic phase-inversions could occur depending on     */
+	/* upload time, which could lead to undesired cancellation of these effects. */
+	const unsigned long t = now % (4UL * update_rate);
+	s32 level = 0;
+
+	if (strong)
+		level += (strong / 4) * (t < 2UL * update_rate ? 1 : -1);
+	if (weak)
+		level += (weak / 4) * (t < 2UL * update_rate ?
+					(t < 1UL * update_rate ? 1 : -1) :
+					(t < 3UL * update_rate ? 1 : -1));
+	direction_up = (ueff->direction > 0x3fffU && ueff->direction <= 0xbfffU);
+	direction_left = (ueff->direction <= 0x7fffU);
+
+	*x += direction_left ? -level : level;
+	*y += direction_up ? -level : level;
+}
+
+static void ffpl_recalc_combined_cf(struct klgd_plugin_private *priv, const unsigned long now)
 {
 	size_t idx;
 	struct ff_effect *cb_latest = &priv->combined_effect_cf.latest;
@@ -383,6 +439,8 @@ static void ffpl_recalc_combined_cf(struct klgd_plugin_private *priv, const unsi
 		s32 _x;
 		s32 _y;
 
+		if (!ffpl_process_memless(priv, ueff, FFPL_HANDLER_CF))
+			continue;
 		if (eff->state != FFPL_STARTED)
 			continue;
 
@@ -391,12 +449,13 @@ static void ffpl_recalc_combined_cf(struct klgd_plugin_private *priv, const unsi
 			ffpl_constant_to_x_y(eff, &_x, &_y, now);
 			break;
 		case FF_PERIODIC:
-			if (!handle_periodic)
-				break;
 			ffpl_periodic_to_x_y(eff, &_x, &_y, now);
 			break;
 		case FF_RAMP:
 			ffpl_ramp_to_x_y(eff, &_x, &_y, now);
+			break;
+		case FF_RUMBLE:
+			ffpl_rumble_to_x_y(eff, &_x, &_y, now);
 			break;
 		default:
 			continue;
@@ -430,7 +489,7 @@ static u16 ffpl_set_rumble_direction(const u16 strong_dir, const u16 weak_dir)
 	return dir;
 }
 
-static void ffpl_recalc_combined_rumble(struct klgd_plugin_private *priv, const unsigned long now, const bool handle_periodic)
+static void ffpl_recalc_combined_rumble(struct klgd_plugin_private *priv, const unsigned long now)
 {
 	size_t idx;
 	struct ff_effect *cb_latest = &priv->combined_effect_rumble.latest;
@@ -452,6 +511,8 @@ static void ffpl_recalc_combined_rumble(struct klgd_plugin_private *priv, const 
 		s32 _weak_x;
 		s32 _weak_y;
 
+		if (!ffpl_process_memless(priv, ueff, FFPL_HANDLER_RUMBLE))
+			continue;
 		if (eff->state != FFPL_STARTED)
 			continue;
 
@@ -462,11 +523,7 @@ static void ffpl_recalc_combined_rumble(struct klgd_plugin_private *priv, const 
 			break;
 		case FF_PERIODIC:
 		{
-			u32 new_level;
-			if (!handle_periodic)
-				break;
-
-			new_level = abs(ffpl_apply_envelope(eff, now));
+			u32 new_level = abs(ffpl_apply_envelope(eff, now));
 			ffpl_lvl_dir_to_x_y(new_level, ueff->direction, &_strong_x, &_strong_y);
 			ffpl_lvl_dir_to_x_y(new_level, ueff->direction, &_weak_x, &_weak_y);
 			break;
@@ -878,7 +935,7 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 
 		if (eff->replace) {
 			/* Uncombinable effect is about to be replaced by a combinable one */
-			if (ffpl_process_memless(priv, &eff->latest)) {
+			if (ffpl_process_memless(priv, &eff->latest, FFPL_HANDLER_ANY)) {
 				printk(KERN_NOTICE "KLGDFF: Replacing uncombinable with combinable\n");
 				switch (eff->state) {
 				case FFPL_STARTED:
@@ -896,22 +953,22 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 			/* Combinable effect is being replaced by an uncombinable one */
 				printk(KERN_NOTICE "KLGDFF: Replacing combinable with uncombinable\n");
 				if (eff->state == FFPL_STARTED)
-					NEEDS_UPDATE_SET(eff->active.type, priv->dev->ffbit);
+					NEEDS_UPDATE_SET(eff->active.type);
 				eff->state = FFPL_EMPTY;
 				eff->replace = false;
 				continue;
 			}
 		} else {
-			if (!ffpl_process_memless(priv, &eff->latest))
+			if (!ffpl_process_memless(priv, &eff->latest, FFPL_HANDLER_ANY))
 				continue;
 		}
 
 		switch (eff->change) {
 		case FFPL_DONT_TOUCH:
 			if (eff->state == FFPL_STARTED) {
-				ACTIVE_EFFECTS_INC(eff->active.type, priv->dev->ffbit);
+				ACTIVE_EFFECTS_INC(eff->active.type);
 				if (eff->recalculate) {
-					NEEDS_UPDATE_SET(eff->active.type, priv->dev->ffbit);
+					NEEDS_UPDATE_SET(eff->active.type);
 					eff->recalculate = false;
 					printk(KERN_NOTICE "KLGDFF: Recalculable combinable effect, total active effects (CF/Rumble) %lu/%lu\n", active_effects_cf, active_effects_rumble);
 				}
@@ -926,14 +983,14 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 				printk(KERN_NOTICE "KLGDFF: Updating a stopped combinable effect\n");
 				break;
 			}
-			ACTIVE_EFFECTS_INC(eff->active.type, priv->dev->ffbit);
-			NEEDS_UPDATE_SET(eff->active.type, priv->dev->ffbit);
+			ACTIVE_EFFECTS_INC(eff->active.type);
+			NEEDS_UPDATE_SET(eff->active.type);
 			printk(KERN_NOTICE "KLGDFF: %s combinable effect, total active effects (CF/Rumble) %lu/%lu\n", eff->change == FFPL_TO_START ? "Started" : "Altered",
 			       active_effects_cf, active_effects_rumble);
 			break;
 		case FFPL_TO_STOP:
 			if (eff->state == FFPL_STARTED)
-				NEEDS_UPDATE_SET(eff->active.type, priv->dev->ffbit);
+				NEEDS_UPDATE_SET(eff->active.type);
 		case FFPL_TO_UPLOAD:
 			eff->active = eff->latest;
 			eff->state = FFPL_UPLOADED;
@@ -941,7 +998,7 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 			break;
 		case FFPL_TO_ERASE:
 			if (eff->state == FFPL_STARTED)
-				NEEDS_UPDATE_SET(eff->active.type, priv->dev->ffbit);
+				NEEDS_UPDATE_SET(eff->active.type);
 			eff->state = FFPL_EMPTY;
 			printk(KERN_NOTICE "KLGDFF: Stopped combinable effect, total active effects (CF/Rumble) %lu/%lu\n", active_effects_cf, active_effects_rumble);
 			break;
@@ -957,7 +1014,7 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 	if (needs_update_cf) {
 		if (active_effects_cf) {
 			printk(KERN_NOTICE "KLGDFF: Combined constant force effect needs an update, total effects active: %lu\n", active_effects_cf);
-			ffpl_recalc_combined_cf(priv, now, test_bit(FF_CONSTANT, priv->dev->ffbit));
+			ffpl_recalc_combined_cf(priv, now);
 			if (priv->combined_effect_cf.state == FFPL_STARTED)
 				priv->combined_effect_cf.change = FFPL_TO_UPDATE;
 			else
@@ -974,7 +1031,7 @@ static int ffpl_handle_combinable_effects(struct klgd_plugin_private *priv, stru
 	if (needs_update_rumble) {
 		if (active_effects_rumble) {
 			printk(KERN_NOTICE "KLGDFF: Combined rumble effect needs an update, total effects active: %lu\n", active_effects_rumble);
-			ffpl_recalc_combined_rumble(priv, now, !test_bit(FF_CONSTANT, priv->dev->ffbit));
+			ffpl_recalc_combined_rumble(priv, now);
 			if (priv->combined_effect_rumble.state == FFPL_STARTED)
 				priv->combined_effect_rumble.change = FFPL_TO_UPDATE;
 			else
@@ -1042,11 +1099,15 @@ static unsigned long ffpl_get_env_recalculation_time(const struct ffpl_effect *e
 	return (time_after(t, eff->stop_at)) ? eff->stop_at : t;
 }
 
-static unsigned long ffpl_get_recalculation_time(const struct ffpl_effect *eff, const unsigned long now)
+static unsigned long ffpl_get_recalculation_time(const struct klgd_plugin_private *priv, const struct ffpl_effect *eff,
+						 const unsigned long now)
 {
 	const struct ff_envelope *env = ffpl_get_envelope(&eff->active);
 	const bool ticks = eff->active.type == FF_PERIODIC || eff->active.type == FF_RAMP;
 	bool has_envelope = false;
+
+	if (eff->active.type == FF_RUMBLE && priv->memless_rumble_emul)
+		return now + msecs_to_jiffies(RECALC_DELTA_T_MSEC);
 
 	if (env)
 		has_envelope = env->attack_length || env->fade_length;
@@ -1080,10 +1141,14 @@ static bool ffpl_needs_recalculation(const struct klgd_plugin_private *priv, con
 	}
 
 	/* Only effects handled by memless mode can be periodically reprocessed */
-	if (!ffpl_process_memless(priv, ueff)) {
+	if (!ffpl_process_memless(priv, ueff, FFPL_HANDLER_ANY)) {
 		printk(KERN_NOTICE "KLGDFF: Effect not combinable, won't recalculate\n");
 		return false;
 	}
+
+	/* Emulated rumble effect needs to be recalculated under all circuumstances */
+	if (ueff->type == FF_RUMBLE && priv->memless_rumble_emul && !(ueff->replay.length && time_after_eq(now, stop_at)))
+		return true;
 
 	if (!env) {
 		printk(KERN_NOTICE "KLGDFF: Effect type does not support envelope, no need to recalculate\n");
@@ -1130,7 +1195,7 @@ static void ffpl_advance_trigger(const struct klgd_plugin_private *priv, struct 
 	case FFPL_TRIG_RECALC:
 		if (ffpl_needs_recalculation(priv, &eff->active, eff->start_at, eff->stop_at, now))
 			break;
-		if (eff->active.replay.length && ffpl_process_memless(priv, &eff->active)) {
+		if (eff->active.replay.length && ffpl_process_memless(priv, &eff->active, FFPL_HANDLER_ANY)) {
 			eff->trigger = FFPL_TRIG_STOP;
 			break;
 		}
@@ -1256,7 +1321,7 @@ static bool ffpl_get_update_time(struct klgd_plugin *self, const unsigned long n
 			eff->repeat--;
 			break;
 		case FFPL_TRIG_RECALC:
-			current_t = ffpl_get_recalculation_time(eff, now);
+			current_t = ffpl_get_recalculation_time(priv, eff, now);
 			eff->recalculate = true;
 			break;
 		default:
@@ -1564,18 +1629,21 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 		printk("KLGDFF: Using REPLACE STARTED\n");
 	}
 
-	if ((FFPL_MEMLESS_RUMBLE & flags) && !test_bit(FF_CONSTANT, dev->ffbit)) {
-		priv->memless_periodic = true;
-		printk(KERN_NOTICE "KLGDFF: Emulating PERIODIC through RUMBLE\n");
-	}
-	else if ((FFPL_MEMLESS_CONSTANT | FFPL_MEMLESS_PERIODIC | FFPL_MEMLESS_RAMP) & flags) {
+	/* Check if the requested memless modes make sense */
+	if ((FFPL_MEMLESS_CONSTANT | FFPL_MEMLESS_PERIODIC | FFPL_MEMLESS_RAMP) & flags) {
 		if (!test_bit(FF_CONSTANT, dev->ffbit)) {
-			printk(KERN_ERR "The driver asked for memless mode but the device does not support FF_CONSTANT\n");
+			printk(KERN_ERR "The driver asked for constant force memless mode but the device does not support FF_CONSTANT\n");
 			ret = -EINVAL;
 			goto err_out3;
 		}
 	}
+	if ((FFPL_MEMLESS_RUMBLE & flags) && !test_bit(FF_RUMBLE, dev->ffbit)) {
+		printk(KERN_ERR "The driver asked for rumble memless mode but the device does not support FF_RUMBLE\n");
+		ret = -EINVAL;
+		goto err_out3;
+	}
 
+	/* Set up memless mode flags */
 	if (FFPL_MEMLESS_CONSTANT & flags)
 		priv->memless_constant = true;
 	if (FFPL_MEMLESS_PERIODIC & flags)
@@ -1586,6 +1654,19 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 		priv->memless_rumble = true;
 	if (FFPL_TIMING_CONDITION & flags)
 		priv->timing_condition = true;
+	/* Set up emulation memless mode flags */
+	/** Emulate rumble through constant force */
+	if (test_bit(FF_CONSTANT, dev->ffbit) && !test_bit(FF_RUMBLE, dev->ffbit)) {
+		printk(KERN_NOTICE "KLGDFF: Emulating FF_RUMBLE through FF_CONSTANT\n");
+		input_set_capability(dev, EV_FF, FF_RUMBLE); /* Prevent ff-core from converting the effect to FF_PERIODIC */
+		priv->memless_rumble_emul = true;
+	}
+	/** Emulate periodic through rumble */
+	if (test_bit(FF_RUMBLE, dev->ffbit) && !test_bit(FF_PERIODIC, dev->ffbit)) {
+		printk(KERN_NOTICE "KLGDFF: Emulating FF_PERIODIC through FF_RUMBLE\n");
+		input_set_capability(dev, EV_FF, FF_PERIODIC);
+		priv->memless_periodic_emul = true;
+	}
 
 	if (FFPL_HAS_NATIVE_GAIN & flags) {
 		priv->has_native_gain = true;

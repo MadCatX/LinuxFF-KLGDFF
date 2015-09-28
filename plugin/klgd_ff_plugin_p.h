@@ -81,11 +81,13 @@ struct klgd_plugin_private {
 	bool has_native_gain;
 	bool has_autocenter;
 	bool memless_constant;
-	bool memless_periodic;
+	bool memless_periodic;	/* Process FF_PERIODIC as constant force */
+	bool memless_periodic_emul; /* Emulate FF_PERIODIC through rumble force */
 	bool memless_ramp;
 	bool memless_rumble;
+	bool memless_rumble_emul; /* Emulate FF_RUMBLE through constant force */
 	bool timing_condition;
-	u32 padding_caps:19;
+	u32 padding_caps:17;
 	/* Device-wide state changes */
 	bool change_gain;
 	bool change_autocenter;

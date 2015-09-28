@@ -380,7 +380,7 @@ static int __init klgdff_init(void)
 	gain = 0xFFFF;
 
 	input_set_capability(dev, EV_FF, FF_CONSTANT);
-	input_set_capability(dev, EV_FF, FF_RUMBLE);
+	//input_set_capability(dev, EV_FF, FF_RUMBLE);
 	input_set_capability(dev, EV_FF, FF_PERIODIC);
 		input_set_capability(dev, EV_FF, FF_SINE);
 		input_set_capability(dev, EV_FF, FF_SQUARE);
@@ -400,7 +400,10 @@ static int __init klgdff_init(void)
 
 	ret = ffpl_init_plugin(&ff_plugin, dev, EFFECT_COUNT,
 			       FFPL_HAS_EMP_TO_SRT | FFPL_REPLACE_STARTED |
-			       FFPL_MEMLESS_CONSTANT | FFPL_MEMLESS_RUMBLE | FFPL_TIMING_CONDITION,
+			       //FFPL_MEMLESS_CONSTANT |
+			       //FFPL_MEMLESS_PERIODIC |
+			       //FFPL_MEMLESS_RUMBLE |
+			       FFPL_TIMING_CONDITION,
 			       klgdff_control, &test_user);
 	if (ret) {
 		printk(KERN_ERR "KLGDFF-TD: Cannot init plugin\n");
