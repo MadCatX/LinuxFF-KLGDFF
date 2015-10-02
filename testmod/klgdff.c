@@ -380,13 +380,13 @@ static int __init klgdff_init(void)
 	gain = 0xFFFF;
 
 	input_set_capability(dev, EV_FF, FF_CONSTANT);
-	//input_set_capability(dev, EV_FF, FF_RUMBLE);
-	input_set_capability(dev, EV_FF, FF_PERIODIC);
+	input_set_capability(dev, EV_FF, FF_RUMBLE);
+	/*input_set_capability(dev, EV_FF, FF_PERIODIC);
 		input_set_capability(dev, EV_FF, FF_SINE);
 		input_set_capability(dev, EV_FF, FF_SQUARE);
 		input_set_capability(dev, EV_FF, FF_SAW_UP);
 		input_set_capability(dev, EV_FF, FF_SAW_DOWN);
-		input_set_capability(dev, EV_FF, FF_TRIANGLE);
+		input_set_capability(dev, EV_FF, FF_TRIANGLE);*/
 	input_set_capability(dev, EV_FF, FF_RAMP);
 	input_set_capability(dev, EV_FF, FF_SPRING);
 

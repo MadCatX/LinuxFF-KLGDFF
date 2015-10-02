@@ -1664,7 +1664,13 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 	/** Emulate periodic through rumble */
 	if (test_bit(FF_RUMBLE, dev->ffbit) && !test_bit(FF_PERIODIC, dev->ffbit)) {
 		printk(KERN_NOTICE "KLGDFF: Emulating FF_PERIODIC through FF_RUMBLE\n");
+		/* Fake full support of periodic effects*/
 		input_set_capability(dev, EV_FF, FF_PERIODIC);
+			input_set_capability(dev, EV_FF, FF_SINE);
+			input_set_capability(dev, EV_FF, FF_SQUARE);
+			input_set_capability(dev, EV_FF, FF_SAW_UP);
+			input_set_capability(dev, EV_FF, FF_SAW_DOWN);
+			input_set_capability(dev, EV_FF, FF_TRIANGLE);
 		priv->memless_periodic_emul = true;
 	}
 
