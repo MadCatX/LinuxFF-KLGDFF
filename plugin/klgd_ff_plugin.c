@@ -718,13 +718,10 @@ static void ffpl_calculate_trip_times(struct ffpl_effect *eff, const unsigned lo
 	eff->updated_at = eff->start_at;
 	eff->touch_at = eff->start_at;
 
-	if (ueff->replay.delay)
-		printk(KERN_NOTICE "KLGDFF: Delayed effect will be started at %lu, now: %lu\n", eff->start_at, now);
 
-	if (ueff->replay.length) {
+	if (ueff->replay.length)
 		eff->stop_at = eff->start_at + msecs_to_jiffies(ueff->replay.length);
-		printk(KERN_NOTICE "KLGDFF: Finite effect will be stopped at %lu, now: %lu\n", eff->stop_at, now);
-	}
+
 }
 
 /* Destroy request - input device is being destroyed */
@@ -737,112 +734,54 @@ static void ffpl_destroy_rq(struct ff_device *ff)
 	kfree(priv);
 }
 
-/* Erase request coming from userspace */
-static int ffpl_erase_rq(struct input_dev *dev, int effect_id)
+/*
+ * Handlers of queued userspace requests.
+ * All of the all called with plugins_lock acqired and dev->event_lock held
+ * Mind the fact that the handlers are not allowed to sleep!
+ */
+
+/*
+ * Handle request to erase an effect within KLGDFF
+ */
+static void ffpl_erase_handler(struct klgd_plugin_private *priv, const int effect_id)
 {
-	struct klgd_plugin *self = dev->ff->private;
-	struct klgd_plugin_private *priv = self->private;
 	struct ffpl_effect *eff = &priv->effects[effect_id];
 
-	printk(KERN_NOTICE "KLGDFF: RQ erase (effect %d)\n", effect_id);
-
-	klgd_lock_plugins(self->plugins_lock);
 	eff->change = FFPL_TO_ERASE;
 	eff->trigger = FFPL_TRIG_NOW;
-	klgd_unlock_plugins_sched(self->plugins_lock);
-
-	return 0;
 }
 
 /*
- * Playback request coming from userspace
- *
- * This function is called with dev->event_lock spinlock held
- * so we cannot grab the plugins_lock mutex here directly.
- *
- * Instead we store the request in a FIFO queue and process it
- * later from a workqueue.
- *
+ * Handle request to start or stop an effect within KLGDFF
  */
-static int ffpl_playback_rq(struct input_dev *dev, int effect_id, int value)
+static void ffpl_playback_handler(struct klgd_plugin_private *priv, const struct ffpl_request_playback *pb, const unsigned long now)
 {
-	struct klgd_plugin *self = dev->ff->private;
-	struct klgd_plugin_private *priv = self->private;
-	struct ffpl_playback_task *t;
+	struct ffpl_effect *eff = &priv->effects[pb->effect_id];
 
-	t = kzalloc(sizeof(*t), GFP_ATOMIC);
-	if (!t)
-		return -ENOMEM;
-
-	t->value = value;
-	t->effect_id = effect_id;
-	list_add_tail(&t->pb_list, &priv->pb_list);
-	queue_work(priv->pbwq, &priv->pbwq_work);
-
-	return 0;
-}
-
-/*
- * Here is where we process all playback requests.
- * We take hold of the dev->event_lock spinlock to make
- * sure that the queue is not modified while we are processing it.
- * We always process the whole queue in one shot.
- */
-static void ffpl_playback_rq_work(struct work_struct *w)
-{
-	unsigned long flags;
-	struct list_head *p, *n;
-	struct klgd_plugin_private *priv = container_of(w, struct klgd_plugin_private, pbwq_work);
-	struct klgd_plugin *self = priv->self;
-	const unsigned long now = jiffies;
-
-	klgd_lock_plugins(self->plugins_lock);
-	spin_lock_irqsave(&priv->dev->event_lock, flags);
-
-	list_for_each_safe(p, n, &priv->pb_list) {
-		struct ffpl_playback_task *t = list_entry(p, struct ffpl_playback_task, pb_list);
-		struct ffpl_effect *eff = &priv->effects[t->effect_id];
-
-		eff->repeat = t->value;
-		if (t->value > 0) {
-			if (ffpl_handle_timing(priv, &eff->latest))
-				ffpl_calculate_trip_times(eff, now);
-			else
-				eff->start_at = now; /* Start the effect right away and let the device deal with the timing */
-			eff->trigger = FFPL_TRIG_START;
-		} else {
-			eff->change = FFPL_TO_STOP;
-			eff->trigger = FFPL_TRIG_NOW;
-		}
-
-		list_del(p);
-		kfree(t);
+	eff->repeat = pb->value;
+	if (pb->value > 0) {
+		if (ffpl_handle_timing(priv, &eff->latest))
+			ffpl_calculate_trip_times(eff, now);
+		else
+			eff->start_at = now; /* Start the effect right away and let the device deal with the timing */
+		eff->trigger = FFPL_TRIG_START;
+	} else {
+		eff->change = FFPL_TO_STOP;
+		eff->trigger = FFPL_TRIG_NOW;
 	}
-
-	spin_unlock_irqrestore(&priv->dev->event_lock, flags);
-	klgd_unlock_plugins_sched(self->plugins_lock);
 }
 
-/* Upload request coming from userspace */
-static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struct ff_effect *old)
+/*
+ * Handle request to upload an effect within KLGDFF
+ */
+static void ffpl_upload_handler(struct klgd_plugin_private *priv, const struct ff_effect *ueff)
 {
-	struct klgd_plugin *self = dev->ff->private;
-	struct klgd_plugin_private *priv = self->private;
-	struct ffpl_effect *eff = &priv->effects[effect->id];
-
-	printk(KERN_NOTICE "KLGDFF: RQ upload (effect %d)\n", effect->id);
-
-	if (!ffpl_is_effect_valid(effect))
-		return -EINVAL;
-
-	klgd_lock_plugins(self->plugins_lock);
-	spin_lock_irq(&dev->event_lock);
+	struct ffpl_effect *eff = &priv->effects[ueff->id];
 
 	/* Copy the new effect to the "latest" slot */
-	eff->latest = *effect;
+	eff->latest = *ueff;
 
 	if (eff->state != FFPL_EMPTY) {
-		printk(KERN_NOTICE "KLGDFF: Updating effect in slot %d\n", effect->id);
 		if (ffpl_needs_replacing(&eff->active, &eff->latest)) {
 			eff->replace = true;
 			eff->change = FFPL_TO_UPLOAD;
@@ -856,38 +795,28 @@ static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struc
 		eff->change = FFPL_TO_UPLOAD;
 		eff->trigger = FFPL_TRIG_NOW;
 	}
-
-	spin_unlock_irq(&dev->event_lock);
-	klgd_unlock_plugins_sched(self->plugins_lock);
-
-	return 0;
 }
 
-static void ffpl_set_autocenter_rq(struct input_dev *dev, u16 autocenter)
+/*
+ * Handle request for change of autocentering force within KLGDFF
+ */
+static void ffpl_set_autocenter_handler(struct klgd_plugin_private *priv, const u16 autocenter)
 {
-	struct klgd_plugin *self = dev->ff->private;
-	struct klgd_plugin_private *priv = self->private;
-
-	klgd_lock_plugins(self->plugins_lock);
-
 	priv->autocenter = autocenter;
 	priv->change_autocenter = true;
-
-	klgd_unlock_plugins_sched(self->plugins_lock);
 }
 
-static void ffpl_set_gain_rq(struct input_dev *dev, u16 gain)
+/*
+ * Handle request for change of gain within KLGDFF
+ */
+static void ffpl_set_gain_handler(struct klgd_plugin_private *priv, const u16 gain)
 {
-	struct klgd_plugin *self = dev->ff->private;
-	struct klgd_plugin_private *priv = self->private;
 	size_t idx;
-
-	klgd_lock_plugins(self->plugins_lock);
 
 	priv->gain = gain;
 	priv->change_gain = true;
 	if (priv->has_native_gain)
-		goto out;
+		return;
 
 	for (idx = 0; idx < priv->effect_count; idx++) {
 		struct ffpl_effect *eff = &priv->effects[idx];
@@ -900,17 +829,201 @@ static void ffpl_set_gain_rq(struct input_dev *dev, u16 gain)
 			eff->trigger = FFPL_TRIG_NOW;
 		}
 	}
+}
 
-out:
+/*
+ * Here is where we process all queued requests.
+ * We take hold of the dev->event_lock spinlock to make
+ * sure that the queue is not modified while we are processing it.
+ * We always process the whole queue in one shot.
+ */
+static void ffpl_request_work(struct work_struct *w)
+{
+	unsigned long flags;
+	struct list_head *p, *n;
+	struct klgd_plugin_private *priv = container_of(w, struct klgd_plugin_private, rqwq_work);
+	struct klgd_plugin *self = priv->self;
+	const unsigned long now = jiffies;
+
+	klgd_lock_plugins(self->plugins_lock);
+	spin_lock_irqsave(&priv->dev->event_lock, flags);
+
+	list_for_each_safe(p, n, &priv->rq_list) {
+		struct ffpl_request_task *t = list_entry(p, struct ffpl_request_task, rq_list);
+		struct ffpl_request *rq = &t->rq;
+
+		switch (rq->type) {
+		case FFPL_RQ_UPLOAD:
+			ffpl_upload_handler(priv, &rq->data.upload_effect);
+			break;
+		case FFPL_RQ_PLAYBACK:
+			ffpl_playback_handler(priv, &rq->data.pb, now);
+			break;
+		case FFPL_RQ_ERASE:
+			ffpl_erase_handler(priv, rq->data.effect_id);
+			break;
+		case FFPL_RQ_AUTOCENTER:
+			ffpl_set_autocenter_handler(priv, rq->data.autocenter);
+			break;
+		case FFPL_RQ_GAIN:
+			ffpl_set_gain_handler(priv, rq->data.gain);
+			break;
+		default:
+			break;
+		}
+
+		list_del(p);
+		kfree(t);
+	}
+
+	spin_unlock_irqrestore(&priv->dev->event_lock, flags);
 	klgd_unlock_plugins_sched(self->plugins_lock);
+}
+
+/*
+ * Some userspace requests are executed in atomic context, namely
+ * playback, set_autocenter and change_gain.
+ * To deal with the inability to sleep inside any of these we push
+ * all requests on a queue and process them later from a workqueue.
+ * To keep the order of requests consistent we push all userspace
+ * requests on that queue.
+ */
+
+/*
+ * Request to erase an effect coming from userspace
+ * Explicit lock of dev->event_lock is required to keep the priv->rq_list consistent
+ */
+static int ffpl_erase_rq(struct input_dev *dev, int effect_id)
+{
+	unsigned long flags;
+	struct ffpl_request_task *t;
+	struct klgd_plugin *self = dev->ff->private;
+	struct klgd_plugin_private *priv = self->private;
+	/*struct ffpl_effect *eff = &priv->effects[effect_id];*/
+
+	printk(KERN_NOTICE "KLGDFF: RQ erase (effect %d)\n", effect_id);
+
+	t = kmalloc(sizeof(*t), GFP_KERNEL);
+	if (!t)
+		return -ENOMEM;
+
+	t->rq.type = FFPL_RQ_ERASE;
+	t->rq.data.effect_id = effect_id;
+
+	spin_lock_irqsave(&dev->event_lock, flags);
+	list_add_tail(&t->rq_list, &priv->rq_list);
+	queue_work(priv->rqwq, &priv->rqwq_work);
+	spin_unlock_irqrestore(&dev->event_lock, flags);
+
+	return 0;
+}
+
+/*
+ * Request to start or stop playback of an effect coming from userspace.
+ * Called with dev->event_lock held
+ */
+static int ffpl_playback_rq(struct input_dev *dev, int effect_id, int value)
+{
+	struct ffpl_request_task *t;
+	struct klgd_plugin *self = dev->ff->private;
+	struct klgd_plugin_private *priv = self->private;
+
+	t = kmalloc(sizeof(*t), GFP_ATOMIC);
+	if (!t)
+		return -ENOMEM;
+
+	t->rq.type = FFPL_RQ_PLAYBACK;
+	t->rq.data.pb.value = value;
+	t->rq.data.pb.effect_id = effect_id;
+	list_add_tail(&t->rq_list, &priv->rq_list);
+	queue_work(priv->rqwq, &priv->rqwq_work);
+
+	return 0;
+}
+
+/*
+ * Request to upload or update an effect coming from userspace.
+ * Explicit lock of dev->event_lock is required to keep the priv->rq_list consistent
+ */
+static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struct ff_effect *old)
+{
+	unsigned long flags;
+	struct ffpl_request_task *t;
+	struct klgd_plugin *self = dev->ff->private;
+	struct klgd_plugin_private *priv = self->private;
+
+	printk(KERN_NOTICE "KLGDFF: RQ upload (effect %d)\n", effect->id);
+
+	if (!ffpl_is_effect_valid(effect))
+		return -EINVAL;
+
+	t = kmalloc(sizeof(*t), GFP_KERNEL);
+	if (!t)
+		return -ENOMEM;
+
+	t->rq.type = FFPL_RQ_UPLOAD;
+	t->rq.data.upload_effect = *effect;
+
+	spin_lock_irqsave(&dev->event_lock, flags);
+	list_add_tail(&t->rq_list, &priv->rq_list);
+	queue_work(priv->rqwq, &priv->rqwq_work);
+	spin_unlock_irqrestore(&dev->event_lock, flags);
+
+	return 0;
+}
+
+/*
+ * Request to change autocentering force coming from userspace.
+ * Called with dev->event_lock held
+ */
+static void ffpl_set_autocenter_rq(struct input_dev *dev, u16 autocenter)
+{
+	struct ffpl_request_task *t;
+	struct klgd_plugin *self = dev->ff->private;
+	struct klgd_plugin_private *priv = self->private;
+
+	t = kmalloc(sizeof(*t), GFP_ATOMIC);
+	if (!t)
+		return;
+
+	t->rq.type = FFPL_RQ_AUTOCENTER;
+	t->rq.data.autocenter = autocenter;
+	list_add_tail(&t->rq_list, &priv->rq_list);
+	queue_work(priv->rqwq, &priv->rqwq_work);
+}
+
+/*
+ * Request to change overall gain coming from userspace.
+ * Called with dev->event_lock held
+ */
+static void ffpl_set_gain_rq(struct input_dev *dev, u16 gain)
+{
+	struct ffpl_request_task *t;
+	struct klgd_plugin *self = dev->ff->private;
+	struct klgd_plugin_private *priv = self->private;
+
+	t = kmalloc(sizeof(*t), GFP_ATOMIC);
+	if (!t)
+		return;
+
+	t->rq.type = FFPL_RQ_GAIN;
+	t->rq.data.gain = gain;
+	list_add_tail(&t->rq_list, &priv->rq_list);
+	queue_work(priv->rqwq, &priv->rqwq_work);
 }
 
 static void ffpl_deinit(struct klgd_plugin *self)
 {
+	struct list_head *p, *n;
 	struct klgd_plugin_private *priv = self->private;
 
-	flush_workqueue(priv->pbwq);
-	destroy_workqueue(priv->pbwq);
+	flush_workqueue(priv->rqwq);
+	destroy_workqueue(priv->rqwq);
+
+	list_for_each_safe(p, n, &priv->rq_list) {
+		list_del(p);
+		kfree(p);
+	}
 
 	printk(KERN_DEBUG "KLGDFF: Deinit complete\n");
 }
@@ -1592,13 +1705,13 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 	priv->control = control;
 	priv->user = user;
 	priv->gain = 0xFFFF;
-	priv->pbwq = create_singlethread_workqueue("ffpl_playback_rq_work");
-	if (!priv->pbwq) {
+	priv->rqwq = create_singlethread_workqueue("ffpl_request_work");
+	if (!priv->rqwq) {
 		ret = -ENOMEM;
 		goto err_out2;
 	}
-	INIT_WORK(&priv->pbwq_work, ffpl_playback_rq_work);
-	INIT_LIST_HEAD(&priv->pb_list);
+	INIT_WORK(&priv->rqwq_work, ffpl_request_work);
+	INIT_LIST_HEAD(&priv->rq_list);
 
 	self->private = priv;
 	priv->self = self;
@@ -1685,7 +1798,7 @@ int ffpl_init_plugin(struct klgd_plugin **plugin, struct input_dev *dev, const s
 	return 0;
 
 err_out3:
-	destroy_workqueue(priv->pbwq);
+	destroy_workqueue(priv->rqwq);
 err_out2:
 	kfree(priv);
 err_out1:

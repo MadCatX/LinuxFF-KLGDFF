@@ -30,6 +30,15 @@ enum ffpl_trigger {
 	FFPL_TRIG_UPDATE    /* Effect needs to be updated */
 };
 
+/* Type of the scheduled request */
+enum ffpl_request_type {
+	FFPL_RQ_UPLOAD,
+	FFPL_RQ_PLAYBACK,
+	FFPL_RQ_ERASE,
+	FFPL_RQ_AUTOCENTER,
+	FFPL_RQ_GAIN
+};
+
 struct ffpl_effect {
 	struct ff_effect active;	/* Last effect submitted to device */
 	struct ff_effect latest;	/* Last effect submitted to us by userspace */
@@ -48,10 +57,27 @@ struct ffpl_effect {
 	bool recalculate;		/* Effect shall be recalculated in the respective processing loop */
 };
 
-struct ffpl_playback_task {
+struct ffpl_request_playback {
 	int effect_id;
 	int value;
-	struct list_head pb_list;
+};
+
+union ffpl_request_data {
+	struct ff_effect upload_effect;
+	struct ffpl_request_playback pb;
+	int effect_id;
+	u16 autocenter;
+	u16 gain;
+};
+
+struct ffpl_request {
+	enum ffpl_request_type type;
+	union ffpl_request_data data;
+};
+
+struct ffpl_request_task {
+	struct ffpl_request rq;
+	struct list_head rq_list;
 };
 
 struct klgd_plugin_private {
@@ -63,9 +89,9 @@ struct klgd_plugin_private {
 	size_t effect_count;
 	struct input_dev *dev;
 
-	struct workqueue_struct *pbwq;
-	struct work_struct pbwq_work;
-	struct list_head pb_list;
+	struct workqueue_struct *rqwq;
+	struct work_struct rqwq_work;
+	struct list_head rq_list;
 
 	int (*control)(struct input_dev *dev, struct klgd_command_stream *s, const enum ffpl_control_command cmd, const union ffpl_control_data data, void *user);
 	void *user;
