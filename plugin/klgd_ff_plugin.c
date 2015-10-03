@@ -848,6 +848,11 @@ static void ffpl_request_work(struct work_struct *w)
 	klgd_lock_plugins(self->plugins_lock);
 	spin_lock_irqsave(&priv->dev->event_lock, flags);
 
+	if (list_empty(&priv->rq_list)) {
+		spin_unlock_irqrestore(&priv->dev->event_lock, flags);
+		klgd_unlock_plugins(self->plugins_lock);
+	}
+
 	list_for_each_safe(p, n, &priv->rq_list) {
 		struct ffpl_request_task *t = list_entry(p, struct ffpl_request_task, rq_list);
 		struct ffpl_request *rq = &t->rq;
