@@ -744,7 +744,7 @@ static int ffpl_erase_rq(struct input_dev *dev, int effect_id)
 	struct klgd_plugin_private *priv = self->private;
 	struct ffpl_effect *eff = &priv->effects[effect_id];
 
-	printk(KERN_NOTICE "KLGDFF: RQ erase\n");
+	printk(KERN_NOTICE "KLGDFF: RQ erase (effect %d)\n", effect_id);
 
 	klgd_lock_plugins(self->plugins_lock);
 	eff->change = FFPL_TO_ERASE;
@@ -830,7 +830,7 @@ static int ffpl_upload_rq(struct input_dev *dev, struct ff_effect *effect, struc
 	struct klgd_plugin_private *priv = self->private;
 	struct ffpl_effect *eff = &priv->effects[effect->id];
 
-	printk(KERN_NOTICE "KLGDFF: RQ upload\n");
+	printk(KERN_NOTICE "KLGDFF: RQ upload (effect %d)\n", effect->id);
 
 	if (!ffpl_is_effect_valid(effect))
 		return -EINVAL;
@@ -1250,12 +1250,14 @@ static int ffpl_get_commands(struct klgd_plugin *self, struct klgd_command_strea
 	}
 
 	/* Handle combined constant force effect here */
+	printk(KERN_NOTICE "KLGDFF: Combined CF: ");
 	ret = ffpl_handle_state_change(priv, *s, &priv->combined_effect_cf, now);
 	if (ret) {
 		printk(KERN_WARNING "KLGDFF: Cannot get command stream for combined constant force effect\n");
 		goto out;
 	}
 
+	printk(KERN_NOTICE "KLGDFF: Combined Rumble: ");
 	ret = ffpl_handle_state_change(priv, *s, &priv->combined_effect_rumble, now);
 	if (ret) {
 		printk(KERN_WARNING "KLGDFF: Cannot get command stream for combined rumble effect\n");
