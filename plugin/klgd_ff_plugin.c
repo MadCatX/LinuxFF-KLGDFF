@@ -270,8 +270,7 @@ static s32 ffpl_apply_envelope(const struct ffpl_effect *eff, const unsigned lon
 		printk(KERN_NOTICE "KLGDFF: FF_RAMP envelope is not handled yet\n");
 		return 0;
 	default:
-		printk(KERN_ERR "KLGDFF: Invalid effect passed to envelope calculation. This cannot happen!\n");
-		BUG();
+		WARN(true, "KLGDFF: Invalid effect passed to envelope calculation. This cannot happen!\n");
 		return 0;
 	}
 	abs_level = abs(level);
@@ -1182,8 +1181,7 @@ static unsigned long ffpl_get_ticking_recalculation_time(const struct ffpl_effec
 	case FF_RAMP:
 		return now + msecs_to_jiffies(RECALC_DELTA_T_MSEC);
 	default:
-		printk(KERN_ERR "KLGDFF: Invalid type of effect passed to ticking ticking_recalculation. This cannot happen!\n");
-		BUG();
+		WARN(true, "KLGDFF: Invalid type of effect passed to ticking ticking_recalculation. This cannot happen!\n");
 		return 0;
 	}
 }
@@ -1240,8 +1238,8 @@ static unsigned long ffpl_get_recalculation_time(const struct klgd_plugin_privat
 	if (ticks)
 		return ffpl_get_ticking_recalculation_time(eff, now);
 	if (!has_envelope) {
-		printk(KERN_ERR "KLGDFF: Effect does not have to be recalculated but ffpl_get_recalculation_time() was called\n");
-		BUG();
+		WARN(true, "KLGDFF: Effect does not have to be recalculated but ffpl_get_recalculation_time() was called\n");
+		return now;
 	}
 
 	return ffpl_get_env_recalculation_time(eff, now);
