@@ -723,6 +723,23 @@ static void ffpl_calculate_trip_times(struct ffpl_effect *eff, const unsigned lo
 
 }
 
+static void ffpl_update_trip_times(struct ffpl_effect *eff, const unsigned long now)
+{
+	const struct ff_effect *ueff_la = &eff->latest;
+	const struct ff_effect *ueff_ac = &eff->active;
+
+	/* The effect has a delay which has not expired yet */
+	if (time_after(eff->start_at, now)) {
+		/* Adjust the time of start */
+		eff->start_at = eff->start_at - msecs_to_jiffies(ueff_ac->replay.delay) + msecs_to_jiffies(ueff_la->replay.delay);
+		eff->updated_at = eff->start_at;
+		eff->touch_at = eff->start_at;
+	}
+
+	if (ueff_la->replay.length)
+		eff->stop_at = eff->start_at + msecs_to_jiffies(ueff_la->replay.length);
+}
+
 /* Destroy request - input device is being destroyed */
 static void ffpl_destroy_rq(struct ff_device *ff)
 {
@@ -773,7 +790,7 @@ static void ffpl_playback_handler(struct klgd_plugin_private *priv, const struct
 /*
  * Handle request to upload an effect within KLGDFF
  */
-static void ffpl_upload_handler(struct klgd_plugin_private *priv, const struct ff_effect *ueff)
+static void ffpl_upload_handler(struct klgd_plugin_private *priv, const struct ff_effect *ueff, const unsigned int now)
 {
 	struct ffpl_effect *eff = &priv->effects[ueff->id];
 
@@ -787,8 +804,16 @@ static void ffpl_upload_handler(struct klgd_plugin_private *priv, const struct f
 			eff->trigger = FFPL_TRIG_NOW;
 		} else {
 			eff->replace = false;
-			eff->change = FFPL_TO_UPDATE;
-			eff->trigger = FFPL_TRIG_UPDATE;
+			ffpl_update_trip_times(eff, now);
+
+			/* The effect is yet to be started, do not try to update it */
+			if (eff->change == FFPL_TO_START)
+				return;
+			if (eff->state == FFPL_STARTED) {
+				eff->change = FFPL_TO_UPDATE;
+				eff->trigger = FFPL_TRIG_UPDATE;
+			}
+			/* Else: effect is not active, do nothing */
 		}
 	} else {
 		eff->change = FFPL_TO_UPLOAD;
@@ -858,7 +883,7 @@ static void ffpl_request_work(struct work_struct *w)
 
 		switch (rq->type) {
 		case FFPL_RQ_UPLOAD:
-			ffpl_upload_handler(priv, &rq->data.upload_effect);
+			ffpl_upload_handler(priv, &rq->data.upload_effect, now);
 			break;
 		case FFPL_RQ_PLAYBACK:
 			ffpl_playback_handler(priv, &rq->data.pb, now);
