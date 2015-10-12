@@ -804,7 +804,8 @@ static void ffpl_upload_handler(struct klgd_plugin_private *priv, const struct f
 			eff->trigger = FFPL_TRIG_NOW;
 		} else {
 			eff->replace = false;
-			ffpl_update_trip_times(eff, now);
+			if (ffpl_handle_timing(priv, ueff))
+				ffpl_update_trip_times(eff, now);
 
 			/* The effect is yet to be started, do not try to update it */
 			if (eff->change == FFPL_TO_START)
